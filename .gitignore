@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+data/qdrant_storage/*
+!data/qdrant_storage/.gitkeep
+data/runtime/*
+!data/runtime/.gitkeep
+.streamlit/secrets.toml
+*.log
+.DS_Store
