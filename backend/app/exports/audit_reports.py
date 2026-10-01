@@ -40,7 +40,7 @@ def build_audit_docx(
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("CADUCEUS — RAPPORT D'AUDIT DOUANIER")
+    r = p.add_run("CGS - HARMONISATION DOUANIÈRE — RAPPORT D'AUDIT")
     r.bold = True
     r.font.size = Pt(18)
 
@@ -113,7 +113,7 @@ def build_audit_docx(
     p = doc.add_paragraph()
     p.add_run("Note de prudence : ").bold = True
     p.add_run(
-        "CADUCEUS fiabilise l'extraction, le rapprochement CAMCIS et les contrôles de cohérence. "
+        "CGS fiabilise l'extraction, le rapprochement avec le référentiel douanier et les contrôles de cohérence. "
         "Il s'abstient lorsqu'une donnée ou une preuve est insuffisante et n'invente ni taux de change, ni traduction, ni position tarifaire absente du référentiel."
     )
 
@@ -134,7 +134,7 @@ def _pdf_html(payload: dict[str, Any], reference_dossier: str, secteur: str, des
     ) or '<tr><td colspan="4">Aucune alerte métier détectée par les contrôles actuellement activés.</td></tr>'
     return f"""
     <html><body>
-    <h1>CADUCEUS - RAPPORT D'AUDIT DOUANIER</h1>
+    <h1>CGS - HARMONISATION DOUANIÈRE - RAPPORT D'AUDIT</h1>
     <table class="meta">
       <tr><th>Référence dossier</th><td>{html.escape(reference_dossier)}</td></tr>
       <tr><th>Fichier source</th><td>{html.escape(source)}</td></tr>
@@ -152,7 +152,7 @@ def _pdf_html(payload: dict[str, Any], reference_dossier: str, secteur: str, des
     </tr></table>
     <h2>Points nécessitant une attention</h2>
     <table class="alerts"><tr><th>N°</th><th>Désignation</th><th>Position tarifaire</th><th>Observation</th></tr>{alerts}</table>
-    <p class="note"><b>Note de prudence :</b> CADUCEUS n'invente ni taux de change, ni traduction, ni position tarifaire absente du référentiel. Les alertes ciblent uniquement les lignes pour lesquelles une vérification apporte une valeur réelle.</p>
+    <p class="note"><b>Note de prudence :</b> CGS n'invente ni taux de change, ni traduction, ni position tarifaire absente du référentiel. Les alertes ciblent uniquement les lignes pour lesquelles une vérification apporte une valeur réelle.</p>
     </body></html>
     """
 
@@ -163,11 +163,11 @@ def build_audit_pdf(
     css = """
     @page { size: A4 landscape; margin: 28pt; }
     body { font-family: sans-serif; font-size: 9pt; color: #111; }
-    h1 { text-align: center; font-size: 17pt; background: #E2F0D9; padding: 8pt; }
+    h1 { text-align: center; font-size: 17pt; background: #F4E8EC; border-left: 6pt solid #982040; padding: 8pt; }
     h2 { font-size: 12pt; margin-top: 14pt; }
     table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
     th, td { border: 0.6pt solid #333; padding: 4pt; vertical-align: top; }
-    th { background: #92D050; font-weight: bold; }
+    th { background: #982040; color: #fff; font-weight: bold; }
     .meta th { width: 25%; text-align: left; }
     .summary th, .summary td { text-align: center; }
     .note { margin-top: 14pt; font-size: 8.5pt; }

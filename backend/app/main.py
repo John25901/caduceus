@@ -53,11 +53,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="CADUCEUS Core API",
+    title="CGS - Harmonisation Douanière API",
     version="2.6.0-sprint6-controlled-ai",
     description=(
-        "Plateforme d'harmonisation douanière CAMCIS avec ingestion universelle, "
-        "normalisation XAF automatique, contrôle sectoriel prudent, arbitrage IA fermé sur candidats CAMCIS, exports professionnels et boucle de revue."
+        "Plateforme propriétaire CREATIV GROUP d'harmonisation douanière avec ingestion universelle, "
+        "normalisation XAF automatique, contrôle sectoriel prudent, arbitrage IA fermé sur candidats du référentiel, exports professionnels et boucle de revue."
     ),
     lifespan=lifespan,
 )
@@ -66,7 +66,7 @@ app = FastAPI(
 def svc(request: Request) -> RuntimeServices:
     services = getattr(request.app.state, "services", None)
     if services is None:
-        raise HTTPException(status_code=503, detail="CADUCEUS n'est pas encore initialisé.")
+        raise HTTPException(status_code=503, detail="CGS - Harmonisation Douanière n'est pas encore initialisé.")
     return services
 
 
@@ -127,7 +127,7 @@ def evaluation_llm_providers(request: Request):
     return {
         "enabled": settings.enable_llm_arbitration,
         "providers": s.arbitrator.provider_statuses(),
-        "guardrail": "L'IA choisit uniquement parmi les candidats CAMCIS fournis ou s'abstient.",
+        "guardrail": "L'IA choisit uniquement parmi les candidats du référentiel douanier fournis ou s'abstient.",
         "max_calls_per_dossier": settings.llm_max_calls_per_dossier,
     }
 
@@ -212,7 +212,7 @@ def evaluation_run_local_model(
     max_cases: int = Query(200, ge=10, le=1000),
 ):
     if model_name not in settings.benchmark_models:
-        raise HTTPException(status_code=400, detail="Modèle non autorisé dans le laboratoire CADUCEUS.")
+        raise HTTPException(status_code=400, detail="Modèle non autorisé dans le laboratoire CGS.")
     s = svc(request)
     fixture_dir = settings.project_root / "tests" / "evaluation" / "fixtures"
     paths = [fixture_dir / "NETIC_reference.xlsx", fixture_dir / "FRANCY_GARDEN_reference.xlsx", fixture_dir / "SOCAAL_reference.xlsx"]
@@ -231,7 +231,7 @@ def evaluation_run_local_model(
 @app.post("/api/v2/export/excel")
 def export_professional_excel(body: dict = Body(...)):
     payload = body.get("payload") or {}
-    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CADUCEUS")
+    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CGS")
     secteur = str(body.get("secteur") or "")
     description_projet = str(body.get("description_projet") or "")
     if not payload.get("resultats"):
@@ -251,7 +251,7 @@ def export_professional_excel(body: dict = Body(...)):
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{safe}_harmonise_CADUCEUS.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe}_harmonise_CGS.xlsx"'},
     )
 
 
@@ -260,14 +260,14 @@ def export_audit_docx(body: dict = Body(...)):
     payload = body.get("payload") or {}
     if not payload.get("resultats"):
         raise HTTPException(status_code=400, detail="Aucun résultat à exporter.")
-    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CADUCEUS")
+    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CGS")
     secteur = str(body.get("secteur") or "")
     description_projet = str(body.get("description_projet") or "")
     content = build_audit_docx(payload, reference_dossier=reference_dossier, secteur=secteur, description_projet=description_projet)
     stem = Path(str(payload.get("source_filename") or reference_dossier)).stem
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem).strip("_") or "DOSSIER"
     return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    headers={"Content-Disposition": f'attachment; filename="{safe}_rapport_audit_CADUCEUS.docx"'})
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_rapport_audit_CGS.docx"'})
 
 
 @app.post("/api/v2/export/audit/pdf")
@@ -275,14 +275,14 @@ def export_audit_pdf(body: dict = Body(...)):
     payload = body.get("payload") or {}
     if not payload.get("resultats"):
         raise HTTPException(status_code=400, detail="Aucun résultat à exporter.")
-    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CADUCEUS")
+    reference_dossier = str(body.get("reference_dossier") or payload.get("reference_prospect") or "DOSSIER-CGS")
     secteur = str(body.get("secteur") or "")
     description_projet = str(body.get("description_projet") or "")
     content = build_audit_pdf(payload, reference_dossier=reference_dossier, secteur=secteur, description_projet=description_projet)
     stem = Path(str(payload.get("source_filename") or reference_dossier)).stem
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in stem).strip("_") or "DOSSIER"
     return Response(content=content, media_type="application/pdf",
-                    headers={"Content-Disposition": f'attachment; filename="{safe}_rapport_audit_CADUCEUS.pdf"'})
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_rapport_audit_CGS.pdf"'})
 
 
 @app.post("/api/v2/feedback/import-validated")
@@ -437,7 +437,7 @@ async def process_bordereau(
                             score = chosen.combined_score
                             status = "PROPOSITION_ARBITREE"
                             reason = (
-                                "Arbitrage IA contrôlé sur une liste fermée de candidats CAMCIS. "
+                                "Arbitrage IA contrôlé sur une liste fermée de candidats du référentiel douanier. "
                                 "Aucun code extérieur au référentiel candidat n'est accepté."
                             )
                             llm_selected += 1

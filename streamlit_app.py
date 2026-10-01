@@ -1,6 +1,6 @@
-"""Entrypoint Streamlit Community Cloud pour CADUCEUS V2.6.
+"""Entrypoint Streamlit Community Cloud pour CGS - Harmonisation Douanière.
 
-Community Cloud n'exécute qu'une commande Streamlit. CADUCEUS conserve pourtant
+Community Cloud n'exécute qu'une commande Streamlit. CGS conserve pourtant
 son API FastAPI interne. Cet entrypoint lance donc l'API comme processus local
 privé, attend /health, puis charge l'interface métier.
 
@@ -112,7 +112,7 @@ def _start_api_if_needed() -> None:
     except Exception:
         pass
     raise RuntimeError(
-        "L'API interne CADUCEUS n'a pas démarré dans le délai imparti. "
+        "L'API interne CGS n'a pas démarré dans le délai imparti. "
         "Consultez les logs Streamlit.\n" + tail
     )
 

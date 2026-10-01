@@ -1,13 +1,13 @@
-# Guide utilisateur CADUCEUS V2.6
+# Guide utilisateur — CGS - Harmonisation Douanière
 
-## 1. Lancer CADUCEUS
+## 1. Lancer CGS - Harmonisation Douanière
 Double-cliquer sur `run_caduceus.bat`. Le lancement courant ne réinstalle aucune dépendance.
 
 ## 2. Renseigner le dossier
 Indiquer la référence, le secteur / activité et une description courte du projet ou du process. Cette description aide le contrôle sectoriel et, lorsqu'elle est activée, l'assistance IA sur les cas ambigus.
 
 ## 3. Importer le document
-Formats admis : Excel, CSV, TXT, Word, PDF et images. CADUCEUS choisit automatiquement entre extraction native et OCR.
+Formats admis : Excel, CSV, TXT, Word, PDF et images. CGS choisit automatiquement entre extraction native et OCR.
 
 ## 4. Vérifier l'extraction
 Utiliser **Vérifier le document avant traitement** pour contrôler désignation, spécifications, quantité, unité, prix et origine. Une donnée insuffisamment fiable est laissée vide plutôt qu'inventée.
@@ -15,7 +15,7 @@ Utiliser **Vérifier le document avant traitement** pour contrôler désignation
 ## 5. Harmoniser
 Cliquer sur **Harmoniser la liste**.
 - Un code source valide dans CAMCIS est confirmé immédiatement.
-- Sinon, CADUCEUS recherche plusieurs candidats CAMCIS en interne.
+- Sinon, CGS recherche plusieurs candidats du référentiel douanier en interne.
 - Le moteur local décide quand la preuve est suffisante.
 - Si le cas reste ambigu et qu'un fournisseur IA est configuré, l'IA reçoit uniquement les candidats CAMCIS déjà trouvés. Elle choisit l'un d'eux ou s'abstient.
 
@@ -28,7 +28,7 @@ Le système applique quatre garde-fous :
 3. budget maximum d'appels par dossier ;
 4. tout code non présent dans la liste fermée de candidats est rejeté.
 
-Pour configurer une clé : lancer une seule fois `configure_ai.bat`, puis redémarrer CADUCEUS.
+Pour configurer une clé : lancer une seule fois `configure_ai.bat`, puis redémarrer CGS.
 
 ## 7. Lire le résultat
 La vue métier reste limitée aux informations utiles : désignation, position tarifaire, libellé, spécifications, quantité, unité, prix XAF, origine et observations. Les scores, candidats alternatifs et informations IA restent dans le diagnostic technique ou les feuilles d'audit masquées.

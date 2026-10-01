@@ -1,6 +1,6 @@
-# CADUCEUS V2.6 — Plateforme d'ingénierie douanière CAMCIS
+# CGS - Harmonisation Douanière — Plateforme propriétaire CREATIV GROUP SARL
 
-CADUCEUS automatise l'ingestion des listes d'équipements, leur harmonisation au référentiel CAMCIS, les contrôles de cohérence sectorielle, la normalisation financière en XAF, l'audit et la production de livrables professionnels.
+CGS - Harmonisation Douanière automatise l'ingestion des listes d'équipements, leur harmonisation au référentiel douanier camerounais, les contrôles de cohérence sectorielle, la normalisation financière en XAF, l'audit et la production de livrables professionnels.
 
 ## Démarrage
 
