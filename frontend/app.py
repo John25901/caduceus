@@ -358,11 +358,11 @@ with mapping_tab:
                             timeout=900,
                         )
                         if not r.ok:
-                            st.error(r.text)
+                            _show_response_error(r)
                         else:
                             st.session_state["v22_result"] = r.json()
                     except Exception as exc:
-                        st.error(str(exc))
+                        _show_exception_error(exc)
 
     if "preview_v22" in st.session_state:
         p = st.session_state["preview_v22"]
@@ -515,7 +515,7 @@ with mapping_tab:
                     else:
                         _show_response_error(rr)
                 except Exception as exc:
-                    st.error(str(exc))
+                    _show_exception_error(exc)
 
         with st.expander("Diagnostic technique — équipe projet uniquement", expanded=False):
             st.caption(
@@ -613,7 +613,7 @@ with eval_tab:
                 with st.spinner(f"Évaluation {label} — peut prendre quelques minutes…"):
                     r = api_post(f"/api/v2/evaluation/run-local-model?model_name={model}&max_cases=200", timeout=3600)
                     if r.ok: st.success("Mesure enregistrée.")
-                    else: st.error(r.text)
+                    else: _show_response_error(r)
 
     try:
         results = api_get("/api/v2/evaluation/results?limit=100", timeout=10).json().get("results", [])
@@ -668,7 +668,7 @@ with eval_tab:
                             if rr.ok:
                                 st.success("Mesure d'arbitrage enregistrée.")
                             else:
-                                st.error(rr.text)
+                                _show_response_error(rr)
         arb_results = api_get("/api/v2/evaluation/arbitration-results?limit=50", timeout=10).json().get("results", [])
         if arb_results:
             adf = pd.DataFrame(arb_results)
