@@ -5,9 +5,11 @@ from datetime import datetime
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from backend.app.core.branding import brand_logo_png
 from backend.app.quality.normalization import sanitize_professional_text
 
 GREEN_HEADER = "92D050"
@@ -105,12 +107,19 @@ def build_professional_excel(
     ]
     last_main_col = len(headers)
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_main_col)
-    title = ws.cell(1, 1, f"LISTE HARMONISÉE DES MATÉRIELS ET ÉQUIPEMENTS — {reference_dossier}")
-    title.font = Font(bold=True, size=15, color=BLACK)
+    # Entête corporate CREATIV GROUP / CGS.
+    logo_stream = io.BytesIO(brand_logo_png(compact=True))
+    logo = XLImage(logo_stream)
+    logo.width = 165
+    logo.height = 40
+    ws.add_image(logo, "A1")
+
+    ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_main_col)
+    title = ws.cell(1, 2, f"CGS - HARMONISATION DOUANIÈRE — {reference_dossier}")
+    title.font = Font(bold=True, size=15, color=GREEN_DARK)
     title.alignment = Alignment(horizontal="center", vertical="center")
     title.fill = PatternFill("solid", fgColor=GREEN_LIGHT)
-    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[1].height = 34
 
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_main_col)
     context_parts = [f"Source : {source_filename}"]
@@ -250,7 +259,7 @@ def build_professional_excel(
     synth.sheet_view.showGridLines = False
     synth.merge_cells("A1:F1")
     synth["A1"] = "RAPPORT SYNTHÉTIQUE DE CONTRÔLE — CGS - HARMONISATION DOUANIÈRE"
-    synth["A1"].font = Font(bold=True, size=16)
+    synth["A1"].font = Font(bold=True, size=16, color=GREEN_DARK)
     synth["A1"].fill = PatternFill("solid", fgColor=GREEN_LIGHT)
     synth["A1"].alignment = Alignment(horizontal="center")
     meta_rows = [
