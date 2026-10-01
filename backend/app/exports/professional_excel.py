@@ -17,7 +17,7 @@ YELLOW = "FFF200"
 ORANGE = "F4B183"
 BLUE = "5B9BD5"
 RED = "FF0000"
-GRAY = "D9E1F2"
+GRAY = "D9D9DC"
 WHITE = "FFFFFF"
 BLACK = "000000"
 
@@ -60,7 +60,7 @@ def _business_status(assessment: dict[str, Any]) -> tuple[str, str, str | None]:
         return "A_VERIFIER", _join_notes("Position tarifaire à confirmer par l’expert.", price_note, lang_note, sector_note), ORANGE
     if tariff_status == "PROPOSITION_ARBITREE":
         return "MODIFICATION", _join_notes(
-            "Position proposée après arbitrage IA contrôlé parmi des candidats CAMCIS existants ; validation experte avant dépôt.",
+            "Position proposée après arbitrage IA contrôlé parmi des candidats du référentiel douanier ; validation experte avant dépôt.",
             sector_note, price_note, lang_note,
         ), YELLOW
     if sector == "A_EXAMINER":
@@ -68,7 +68,7 @@ def _business_status(assessment: dict[str, Any]) -> tuple[str, str, str | None]:
     if item.get("statut_prix") in {"TAUX_REQUIS", "INCOHERENT_SOURCE"}:
         return "A_VERIFIER", _join_notes(price_note, sector_note, lang_note), ORANGE
     if source and proposed and source != proposed:
-        return "MODIFICATION", _join_notes("Position tarifaire harmonisée par CADUCEUS par rapport au document reçu.", sector_note, price_note, lang_note), YELLOW
+        return "MODIFICATION", _join_notes("Position tarifaire harmonisée par CGS par rapport au document reçu.", sector_note, price_note, lang_note), YELLOW
     if lang_note:
         return "MODIFICATION", _join_notes(lang_note, sector_note, price_note), YELLOW
     if sector == "JUSTIFIABLE":
@@ -128,7 +128,7 @@ def build_professional_excel(
     for col, label in enumerate(headers, start=1):
         cell = ws.cell(header_row, col, label)
         cell.fill = PatternFill("solid", fgColor=GREEN_HEADER)
-        cell.font = Font(bold=True, color=BLACK)
+        cell.font = Font(bold=True, color=WHITE)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = Border(left=MEDIUM, right=MEDIUM, top=MEDIUM, bottom=MEDIUM)
     ws.row_dimensions[header_row].height = 36
@@ -192,12 +192,12 @@ def build_professional_excel(
     ws.merge_cells(start_row=3, start_column=legend_col, end_row=3, end_column=legend_col + 1)
     ltitle = ws.cell(3, legend_col, "CLÉ / RÉFÉRENCE")
     ltitle.fill = PatternFill("solid", fgColor=GREEN_HEADER)
-    ltitle.font = Font(bold=True)
+    ltitle.font = Font(bold=True, color=WHITE)
     ltitle.alignment = Alignment(horizontal="center")
     ltitle.border = Border(left=MEDIUM, right=MEDIUM, top=MEDIUM, bottom=MEDIUM)
 
     legend = [
-        (YELLOW, "Harmonisation ou nettoyage de présentation apporté par CADUCEUS."),
+        (YELLOW, "Harmonisation ou nettoyage de présentation apporté par CGS."),
         (ORANGE, "Vérification ciblée requise avant dépôt."),
         (BLUE, "Cohérence sectorielle à examiner ; aucune non-éligibilité n'est conclue automatiquement."),
         (RED, "Donnée indispensable manquante ou classement non déterminé."),
@@ -243,13 +243,13 @@ def build_professional_excel(
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_title_rows = f"1:{header_row}"
     ws.sheet_view.zoomScale = 80
-    ws.oddFooter.center.text = "CADUCEUS — Document de travail soumis à validation de l’expert douane"
+    ws.oddFooter.center.text = "CGS - Harmonisation Douanière — CREATIV GROUP SARL — Document soumis à validation de l’expert douane"
 
     # Supervisor summary: readable without technical retrieval scores.
     synth = wb.create_sheet("Synthèse audit")
     synth.sheet_view.showGridLines = False
     synth.merge_cells("A1:F1")
-    synth["A1"] = "RAPPORT SYNTHÉTIQUE DE CONTRÔLE — CADUCEUS"
+    synth["A1"] = "RAPPORT SYNTHÉTIQUE DE CONTRÔLE — CGS - HARMONISATION DOUANIÈRE"
     synth["A1"].font = Font(bold=True, size=16)
     synth["A1"].fill = PatternFill("solid", fgColor=GREEN_LIGHT)
     synth["A1"].alignment = Alignment(horizontal="center")
@@ -322,7 +322,7 @@ def build_professional_excel(
         ("Référence dossier", reference_dossier), ("Fichier source", source_filename),
         ("Secteur / activité", secteur), ("Description projet / process", description_projet),
         ("Profil projet", profile.get("label")), ("Confiance profil", profile.get("confidence")),
-        ("Référentiel CAMCIS SHA-256", (payload.get("camcis") or {}).get("sha256")),
+        ("Empreinte du référentiel douanier (SHA-256)", (payload.get("camcis") or {}).get("sha256")),
         ("Mode moteur", payload.get("search_mode")), ("État index sémantique", payload.get("semantic_index_status")),
         ("Arbitrage IA dossier", str(payload.get("llm_arbitration") or {})),
     ]:
