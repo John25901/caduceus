@@ -6,50 +6,54 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from backend.app.core.branding import brand_favicon_image, brand_logo_data_uri, brand_logo_png
+
 API_BASE = os.getenv("CADUCEUS_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 INTERNAL_TOP_K = 5  # Paramètre moteur, volontairement masqué à l'utilisateur métier.
 
-st.set_page_config(page_title="CGS - Harmonisation Douanière", layout="wide")
+st.set_page_config(page_title="CGS - Harmonisation Douanière", page_icon=brand_favicon_image(), layout="wide")
 
 # Charte visuelle CREATIV GROUP SARL : gris + rouge bordeaux.
-st.markdown(
-    """
+CGS_CSS = """
 <style>
 :root {
-  --cgs-bordeaux: #982040;
-  --cgs-bordeaux-dark: #74172f;
+  --cgs-bordeaux: #A02041;
+  --cgs-bordeaux-dark: #7D1933;
   --cgs-bordeaux-soft: #f4e8ec;
   --cgs-charcoal: #2f3136;
   --cgs-gray: #6d7076;
   --cgs-gray-light: #e7e7e9;
   --cgs-surface: #f5f5f6;
-  --cgs-white: #ffffff;
 }
-
 .stApp { background: var(--cgs-surface); color: #25272b; }
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
 [data-testid="stSidebar"] { background: var(--cgs-charcoal); border-right: 4px solid var(--cgs-bordeaux); }
-[data-testid="stSidebar"] * { color: #f4f4f4; }
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span:not([data-baseweb="tag"] span) { color: #f4f4f4; }
 [data-testid="stSidebar"] input,
-[data-testid="stSidebar"] textarea,
-[data-testid="stSidebar"] [data-baseweb="select"] * { color: #f4f4f4 !important; }
-[data-testid="stSidebar"] hr { border-color: #55585e; }
-
+[data-testid="stSidebar"] textarea { color: #25272b !important; background: #ffffff !important; }
+[data-testid="stSidebar"] hr { border-color: #56585d; }
 .cgs-brand-header {
-  background: linear-gradient(120deg, #ffffff 0%, #f6f6f7 72%, #f4e8ec 100%);
+  display: flex;
+  align-items: center;
+  gap: 1.35rem;
+  background: linear-gradient(120deg, #ffffff 0%, #f7f7f8 76%, #f4e8ec 100%);
   border-left: 7px solid var(--cgs-bordeaux);
   border-bottom: 1px solid #d8d8db;
-  border-radius: 8px;
-  padding: 1.15rem 1.35rem 1.05rem 1.35rem;
+  border-radius: 9px;
+  padding: 1rem 1.25rem;
   margin: 0 0 1.1rem 0;
-  box-shadow: 0 2px 8px rgba(25, 25, 28, .05);
+  box-shadow: 0 2px 10px rgba(25,25,28,.06);
 }
-.cgs-brand-kicker { color: var(--cgs-bordeaux); font-size: .78rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; margin-bottom: .2rem; }
-.cgs-brand-title { color: #24262a; font-size: 2.15rem; font-weight: 800; line-height: 1.12; margin: 0; }
-.cgs-brand-subtitle { color: #62656b; font-size: .98rem; margin-top: .45rem; max-width: 1050px; }
-.cgs-sidebar-brand { border-bottom: 1px solid #5a5c61; padding: .15rem 0 1rem 0; margin-bottom: .8rem; }
-.cgs-sidebar-brand strong { color: #ffffff !important; font-size: 1.05rem; }
-.cgs-sidebar-brand span { color: #d8d8db !important; font-size: .78rem; }
-
+.cgs-brand-header img { width: 205px; max-width: 26%; height: auto; object-fit: contain; }
+.cgs-brand-copy { min-width: 0; }
+.cgs-brand-kicker { color: var(--cgs-bordeaux); font-size: .76rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.cgs-brand-title { color: #24262a; font-size: 2.05rem; font-weight: 800; line-height: 1.12; margin-top: .15rem; }
+.cgs-brand-subtitle { color: #62656b; font-size: .95rem; margin-top: .42rem; max-width: 980px; }
 .stButton > button, .stDownloadButton > button {
   border-radius: 6px;
   border: 1px solid var(--cgs-bordeaux) !important;
@@ -70,15 +74,36 @@ button[data-baseweb="tab"][aria-selected="true"] { color: var(--cgs-bordeaux) !i
 [data-testid="stDataFrame"] { border: 1px solid #d4d4d7; border-radius: 6px; overflow: hidden; }
 div[data-testid="stAlert"] { border-radius: 6px; }
 hr { border-color: #d9d9dc; }
+@media (max-width: 780px) {
+  .cgs-brand-header { align-items: flex-start; gap: .8rem; padding: .85rem; }
+  .cgs-brand-header img { width: 130px; max-width: 35%; }
+  .cgs-brand-title { font-size: 1.55rem; }
+  .cgs-brand-subtitle { font-size: .86rem; }
+}
 </style>
+"""
+
+# st.html évite que le CSS/HTML soit rendu comme texte Markdown sur Community Cloud.
+if hasattr(st, "html"):
+    st.html(CGS_CSS)
+else:  # Compatibilité avec d'anciennes installations locales.
+    st.markdown(CGS_CSS, unsafe_allow_html=True)
+
+logo_uri = brand_logo_data_uri(compact=True)
+header_html = f"""
 <div class="cgs-brand-header">
-  <div class="cgs-brand-kicker">CREATIV GROUP SARL</div>
-  <div class="cgs-brand-title">CGS - Harmonisation Douanière</div>
-  <div class="cgs-brand-subtitle">Plateforme propriétaire d'ingénierie douanière : ingestion documentaire, harmonisation tarifaire, contrôle de cohérence et rapports professionnels.</div>
+  <img src="{logo_uri}" alt="CREATIV GROUP SARL">
+  <div class="cgs-brand-copy">
+    <div class="cgs-brand-kicker">PLATEFORME PROPRIÉTAIRE · CREATIV GROUP SARL</div>
+    <div class="cgs-brand-title">CGS - Harmonisation Douanière</div>
+    <div class="cgs-brand-subtitle">Ingestion documentaire, harmonisation tarifaire, contrôle de cohérence et rapports professionnels.</div>
+  </div>
 </div>
-    """,
-    unsafe_allow_html=True,
-)
+"""
+if hasattr(st, "html"):
+    st.html(header_html)
+else:
+    st.markdown(header_html, unsafe_allow_html=True)
 
 
 def api_get(path: str, timeout: int = 30):
@@ -87,6 +112,77 @@ def api_get(path: str, timeout: int = 30):
 
 def api_post(path: str, **kwargs):
     return requests.post(f"{API_BASE}{path}", **kwargs)
+
+
+def _normalize_error_payload(detail, *, status_code: int | None = None) -> dict:
+    if isinstance(detail, dict):
+        return {
+            "title": detail.get("title") or "Traitement impossible",
+            "message": detail.get("message") or "CGS n'a pas pu terminer cette opération.",
+            "hints": detail.get("hints") or [],
+            "details": detail.get("details") or {},
+            "code": detail.get("code"),
+        }
+    text = str(detail or "").strip()
+    if status_code == 413:
+        return {
+            "title": "Fichier trop volumineux",
+            "message": "Le document dépasse la taille autorisée par la plateforme.",
+            "hints": ["Compressez le document ou séparez-le en plusieurs fichiers."],
+            "details": {},
+            "code": "FILE_TOO_LARGE",
+        }
+    if status_code == 503:
+        return {
+            "title": "Service temporairement indisponible",
+            "message": "Un composant de CGS n'est pas encore disponible. Réessayez dans quelques instants.",
+            "hints": [],
+            "details": {},
+            "code": "SERVICE_UNAVAILABLE",
+        }
+    return {
+        "title": "Traitement impossible",
+        "message": text or "CGS n'a pas pu terminer cette opération.",
+        "hints": ["Vérifiez le document puis réessayez. Si l'erreur persiste, utilisez le fichier source original."],
+        "details": {},
+        "code": None,
+    }
+
+
+def _show_user_error(error: dict) -> None:
+    title = error.get("title") or "Traitement impossible"
+    message = error.get("message") or "CGS n'a pas pu terminer cette opération."
+    hints = [str(x) for x in (error.get("hints") or []) if str(x).strip()]
+    st.toast(title, icon="⚠️")
+    st.error(f"**{title}**\n\n{message}")
+    if hints:
+        st.info("**Que faire ?**\n\n" + "\n".join(f"- {h}" for h in hints))
+    details = error.get("details") or {}
+    technical = details.get("technical_message") or details.get("reason")
+    if technical:
+        with st.expander("Détails techniques — équipe projet", expanded=False):
+            st.code(str(technical))
+
+
+def _show_response_error(response) -> None:
+    try:
+        body = response.json()
+        detail = body.get("detail", body) if isinstance(body, dict) else body
+    except Exception:
+        detail = None
+    _show_user_error(_normalize_error_payload(detail, status_code=getattr(response, "status_code", None)))
+
+
+def _show_exception_error(exc: Exception) -> None:
+    _show_user_error({
+        "title": "Connexion ou traitement interrompu",
+        "message": "CGS n'a pas pu terminer l'opération demandée.",
+        "hints": [
+            "Réessayez dans quelques instants.",
+            "Si le problème concerne une image, privilégiez l'original ou un PDF plutôt qu'une capture compressée.",
+        ],
+        "details": {"technical_message": str(exc)},
+    })
 
 
 def _business_observation(a: dict) -> str:
@@ -154,6 +250,9 @@ def _technical_table(payload: dict) -> pd.DataFrame:
 
 
 with st.sidebar:
+    st.image(brand_logo_png(compact=True), width=220)
+    st.caption("CGS - Harmonisation Douanière")
+    st.divider()
     st.subheader("Dossier")
     ref_client = st.text_input("Référence dossier", "DOSSIER-CREATIV-001")
     secteur = st.text_input("Secteur / activité", "")
@@ -194,7 +293,7 @@ with st.sidebar:
             if ocr.get("available"):
                 st.caption(f"OCR : disponible ({ocr.get('engine', 'Tesseract')})")
             else:
-                st.caption("OCR images/scans : moteur à activer — lancez une fois install_ocr_windows.bat")
+                st.caption("OCR images/scans : indisponible sur cette instance — vérifiez le déploiement Tesseract.")
             llm = h.get("llm_arbitration") or {}
             configured_ai = [p for p in (llm.get("providers") or []) if p.get("configured")]
             if configured_ai:
@@ -237,9 +336,9 @@ with mapping_tab:
                         p = r.json()
                         st.session_state["preview_v22"] = p
                     else:
-                        st.error(r.text)
+                        _show_response_error(r)
                 except Exception as exc:
-                    st.error(str(exc))
+                    _show_exception_error(exc)
         with c2:
             if st.button("Harmoniser la liste", type="primary"):
                 with st.spinner("Analyse de la liste et rapprochement avec le référentiel douanier…"):
@@ -259,11 +358,11 @@ with mapping_tab:
                             timeout=900,
                         )
                         if not r.ok:
-                            st.error(r.text)
+                            _show_response_error(r)
                         else:
                             st.session_state["v22_result"] = r.json()
                     except Exception as exc:
-                        st.error(str(exc))
+                        _show_exception_error(exc)
 
     if "preview_v22" in st.session_state:
         p = st.session_state["preview_v22"]
@@ -384,7 +483,7 @@ with mapping_tab:
                         mime="application/pdf",
                     )
         except Exception as exc:
-            st.error(f"Export indisponible : {exc}")
+            _show_exception_error(exc)
 
         with st.expander("Cycle d'amélioration / réimport", expanded=False):
             st.write(
@@ -414,9 +513,9 @@ with mapping_tab:
                         if info.get("invalid_codes"):
                             st.warning("Certaines positions ne sont pas présentes dans le référentiel douanier et n'ont pas été mémorisées.")
                     else:
-                        st.error(rr.text)
+                        _show_response_error(rr)
                 except Exception as exc:
-                    st.error(str(exc))
+                    _show_exception_error(exc)
 
         with st.expander("Diagnostic technique — équipe projet uniquement", expanded=False):
             st.caption(
@@ -503,7 +602,7 @@ with eval_tab:
             with st.spinner("Évaluation en cours…"):
                 r = api_post("/api/v2/evaluation/run-lexical-baseline?max_cases=200", timeout=900)
                 if r.ok: st.success("Mesure enregistrée.")
-                else: st.error(r.text)
+                else: _show_response_error(r)
     models = [
         ("MiniLM multilingue", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
         ("E5 multilingue", "intfloat/multilingual-e5-small"),
@@ -514,7 +613,7 @@ with eval_tab:
                 with st.spinner(f"Évaluation {label} — peut prendre quelques minutes…"):
                     r = api_post(f"/api/v2/evaluation/run-local-model?model_name={model}&max_cases=200", timeout=3600)
                     if r.ok: st.success("Mesure enregistrée.")
-                    else: st.error(r.text)
+                    else: _show_response_error(r)
 
     try:
         results = api_get("/api/v2/evaluation/results?limit=100", timeout=10).json().get("results", [])
@@ -569,7 +668,7 @@ with eval_tab:
                             if rr.ok:
                                 st.success("Mesure d'arbitrage enregistrée.")
                             else:
-                                st.error(rr.text)
+                                _show_response_error(rr)
         arb_results = api_get("/api/v2/evaluation/arbitration-results?limit=50", timeout=10).json().get("results", [])
         if arb_results:
             adf = pd.DataFrame(arb_results)

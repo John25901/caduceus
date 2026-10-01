@@ -11,10 +11,11 @@ import fitz
 from docx import Document
 from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, RGBColor
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from backend.app.core.branding import brand_logo_data_uri, brand_logo_png
 from backend.app.exports.professional_excel import audit_rows, summary_counts
 
 
@@ -37,6 +38,10 @@ def build_audit_docx(
     sec.right_margin = Cm(1.5)
     sec.top_margin = Cm(1.4)
     sec.bottom_margin = Cm(1.4)
+
+    hp = sec.header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    hp.add_run().add_picture(io.BytesIO(brand_logo_png(compact=True)), width=Cm(5.2))
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -132,8 +137,10 @@ def _pdf_html(payload: dict[str, Any], reference_dossier: str, secteur: str, des
         f"<td>{html.escape(r['code'])}</td><td>{html.escape(r['observation'])}</td>"
         "</tr>" for r in rows
     ) or '<tr><td colspan="4">Aucune alerte métier détectée par les contrôles actuellement activés.</td></tr>'
+    logo_uri = brand_logo_data_uri(compact=True)
     return f"""
     <html><body>
+    <div class="brand"><img src="{logo_uri}" alt="CREATIV GROUP SARL"></div>
     <h1>CGS - HARMONISATION DOUANIÈRE - RAPPORT D'AUDIT</h1>
     <table class="meta">
       <tr><th>Référence dossier</th><td>{html.escape(reference_dossier)}</td></tr>
@@ -163,11 +170,11 @@ def build_audit_pdf(
     css = """
     @page { size: A4 landscape; margin: 28pt; }
     body { font-family: sans-serif; font-size: 9pt; color: #111; }
-    h1 { text-align: center; font-size: 17pt; background: #F4E8EC; border-left: 6pt solid #982040; padding: 8pt; }
+    h1 { text-align: center; font-size: 17pt; background: #F4E8EC; border-left: 6pt solid #A02041; padding: 8pt; }
     h2 { font-size: 12pt; margin-top: 14pt; }
     table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
     th, td { border: 0.6pt solid #333; padding: 4pt; vertical-align: top; }
-    th { background: #982040; color: #fff; font-weight: bold; }
+    th { background: #A02041; color: #fff; font-weight: bold; }
     .meta th { width: 25%; text-align: left; }
     .summary th, .summary td { text-align: center; }
     .note { margin-top: 14pt; font-size: 8.5pt; }

@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from backend.app.ingestion.common import ParsedDocument
+from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import TesseractOCR
 from backend.app.ingestion.tabular_parser import TabularEquipmentParser, detect_header_row
 from backend.app.models.domain import EquipmentItem
@@ -17,7 +18,7 @@ from backend.app.normalization.text import clean_text, normalize_search_text
 SUPPORTED_EXTENSIONS = {
     ".xlsx", ".xls", ".csv", ".txt",
     ".pdf", ".docx",
-    ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff",
+    ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp",
 }
 
 _UNIT_RE = r"(?:set|sets|pcs?|pieces?|units?|uni|lots?|jeux?|m2|m²|m3|m³|kg|kgs|tonnes?|tons?|t|ens|bac|bags?|rolls?)"
@@ -353,7 +354,16 @@ class UniversalEquipmentParser:
     def parse_bytes(self, data: bytes, filename: str) -> ParsedDocument:
         ext = Path(filename).suffix.lower()
         if ext not in SUPPORTED_EXTENSIONS:
-            raise ValueError(f"Format non pris en charge : {ext or 'sans extension'}")
+            raise IngestionError(
+                code="FORMAT_NON_PRIS_EN_CHARGE",
+                title="Format de fichier non pris en charge",
+                message=f"Le format « {ext or 'sans extension'} » n'est pas reconnu par CGS.",
+                hints=[
+                    "Utilisez Excel, CSV/TXT, Word, PDF, PNG, JPEG, WEBP, TIFF ou BMP.",
+                    "Si le document provient d'un téléphone, exportez-le de préférence en PDF ou PNG.",
+                ],
+                details={"extension": ext or None},
+            )
         if ext in {".xlsx", ".xls", ".csv", ".txt"}:
             return self._parse_tabular_or_text(data, filename, ext)
         if ext == ".docx":
@@ -536,10 +546,16 @@ class UniversalEquipmentParser:
                     if self.ocr.status().available:
                         try:
                             image = self._render_pdf_page(data, page_no)
-                            ocr_text = self.ocr.image_to_text(image)
+                            ocr_read = self.ocr.read_best(image)
+                            ocr_text = ocr_read.text
                             pages_ocr += 1
                             page_texts[-1] = (page_no, ocr_text)
                             total_chars += len(ocr_text)
+                            if ocr_read.confidence < 50:
+                                warnings.append(
+                                    f"Page {page_no}: OCR de faible confiance ({ocr_read.confidence:.0f} %). "
+                                    "Les valeurs incertaines ne sont pas complétées automatiquement."
+                                )
                             ocr_items = parse_loose_text(ocr_text, filename, source_page=page_no, method="OCR_PDF", require_commercial_structure=True)
                             if not ocr_items:
                                 ocr_items = parse_ocr_commercial_lines(ocr_text, filename, source_page=page_no, method="OCR_PDF")
@@ -596,33 +612,137 @@ class UniversalEquipmentParser:
 
     def _parse_image(self, data: bytes, filename: str) -> ParsedDocument:
         if not self.enable_ocr:
-            raise ValueError("OCR désactivé : impossible de traiter une image.")
+            raise IngestionError(
+                code="OCR_DESACTIVE",
+                title="Lecture OCR désactivée",
+                message="Ce fichier est une image et nécessite le moteur OCR.",
+                hints=["Activez l'OCR ou fournissez le document PDF/Excel d'origine."],
+            )
+
         status = self.ocr.status()
         if not status.available:
-            raise ValueError(
-                "OCR Tesseract indisponible. Configurez TESSERACT_CMD ou installez Tesseract, "
-                "puis relancez CADUCEUS."
+            raise IngestionError(
+                code="OCR_INDISPONIBLE",
+                title="Moteur OCR indisponible",
+                message="CGS ne peut pas encore lire les images/scans sur cet environnement.",
+                hints=[
+                    "Sur la version en ligne, vérifiez que le dernier déploiement incluant Tesseract est terminé.",
+                    "Sur Windows local, installez Tesseract puis relancez l'application.",
+                    "Les fichiers Excel, Word et PDF natifs restent utilisables sans OCR.",
+                ],
+                details={"reason": status.reason},
             )
-        from PIL import Image, ImageOps
 
-        image = Image.open(io.BytesIO(data)).convert("RGB")
-        # Simple contrast normalization before OCR; no heavy CV pipeline at startup.
-        image = ImageOps.autocontrast(image)
-        text = self.ocr.image_to_text(image)
+        from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError, features
+
+        ext = Path(filename).suffix.lower()
+        if ext == ".webp" and not features.check("webp"):
+            raise IngestionError(
+                code="WEBP_NON_SUPPORTE",
+                title="Support WEBP indisponible",
+                message="La bibliothèque image de cet environnement ne sait pas décoder le fichier WEBP.",
+                hints=["Convertissez temporairement l'image en PNG/JPEG ou relancez après mise à jour de Pillow."],
+            )
+
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        try:
+            image = Image.open(io.BytesIO(data))
+            try:
+                image.seek(0)
+            except Exception:
+                pass
+            image.load()
+            image = ImageOps.exif_transpose(image)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise IngestionError(
+                code="IMAGE_ILLISIBLE",
+                title="Image illisible ou endommagée",
+                message="Le fichier image n'a pas pu être décodé de façon fiable.",
+                hints=[
+                    "Vérifiez que le fichier s'ouvre normalement sur votre ordinateur.",
+                    "Réexportez la pièce en PNG/JPEG ou PDF si elle provient d'une messagerie.",
+                    "Évitez les captures partiellement téléchargées ou compressées plusieurs fois.",
+                ],
+                details={"technical_message": str(exc), "extension": ext},
+            ) from exc
+
+        if image.width < 220 or image.height < 120:
+            raise IngestionError(
+                code="IMAGE_RESOLUTION_TROP_FAIBLE",
+                title="Résolution insuffisante",
+                message=f"L'image ({image.width} × {image.height} px) est trop petite pour une lecture douanière fiable.",
+                hints=[
+                    "Utilisez l'image originale plutôt qu'une miniature.",
+                    "Privilégiez au moins 1200 px sur le grand côté pour une proforma ou un tableau.",
+                ],
+                details={"width": image.width, "height": image.height},
+            )
+
+        try:
+            read = self.ocr.read_best(image)
+        except Exception as exc:
+            raise IngestionError(
+                code="OCR_ECHEC_TECHNIQUE",
+                title="Échec de lecture OCR",
+                message="Le moteur OCR n'a pas pu terminer l'analyse de cette image.",
+                hints=[
+                    "Réessayez avec l'image originale ou un PDF.",
+                    "Si le document est très volumineux, recadrez uniquement la zone contenant le tableau.",
+                ],
+                details={"technical_message": str(exc), "extension": ext},
+            ) from exc
+
+        text = read.text
         items = parse_loose_text(text, filename, source_page=1, method="OCR_IMAGE", require_commercial_structure=True)
         if not items:
             items = parse_ocr_commercial_lines(text, filename, source_page=1, method="OCR_IMAGE")
-        if not items:
-            raise ValueError(
-                "OCR exécuté mais aucune ligne équipement structurée n'a été détectée. "
-                "Utilisez une image plus nette ou un document PDF/Excel si disponible."
+
+        warnings: list[str] = []
+        if read.confidence < 55:
+            warnings.append(
+                f"Qualité OCR moyenne/faible ({read.confidence:.0f} %). "
+                "CGS conserve uniquement les informations structurées détectées et n'invente pas les valeurs illisibles."
             )
+
+        if not items:
+            low_quality = read.confidence < 50 or read.token_count < 8 or len(text.strip()) < 40
+            if low_quality:
+                raise IngestionError(
+                    code="OCR_QUALITE_INSUFFISANTE",
+                    title="Image reconnue, mais lecture trop incertaine",
+                    message=(
+                        "Du texte a été détecté, mais sa qualité n'est pas suffisante pour reconstruire "
+                        "des lignes d'équipements sans risque d'erreur."
+                    ),
+                    hints=[
+                        "Recadrez le document afin que le tableau occupe la majorité de l'image.",
+                        "Redressez la prise de vue et évitez ombres, reflets et flou de mouvement.",
+                        "Utilisez la photo originale ou le PDF fournisseur plutôt qu'une capture compressée.",
+                    ],
+                    details={"ocr": read.as_dict(), "extension": ext},
+                )
+            raise IngestionError(
+                code="OCR_STRUCTURE_NON_RECONNUE",
+                title="Tableau non reconnu automatiquement",
+                message=(
+                    "Le texte est lisible, mais CGS n'a pas identifié une structure commerciale suffisamment "
+                    "fiable (désignation, quantité, prix) pour créer les lignes."
+                ),
+                hints=[
+                    "Vérifiez que l'image contient bien la zone du tableau ou de la proforma.",
+                    "Essayez un recadrage plus serré ou le PDF/Excel source.",
+                    "Aucune ligne n'a été inventée à partir du texte non structuré.",
+                ],
+                details={"ocr": read.as_dict(), "extension": ext},
+            )
+
         return ParsedDocument(
             items=_dedupe(items),
             source_type="IMAGE",
-            extraction_method="OCR_TESSERACT",
-            warnings=[],
+            extraction_method=f"OCR_TESSERACT/{read.strategy}/PSM{read.psm}",
+            warnings=warnings,
             pages_total=1,
             pages_ocr=1,
             raw_text_chars=len(text),
         )
+

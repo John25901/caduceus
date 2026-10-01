@@ -68,3 +68,15 @@ Voir `SPRINT6_REPORT.md`, `CHANGELOG_V2_6.md`, `MIGRATION_V2_6.md` et `GUIDE_UTI
 
 La distribution de déploiement inclut `streamlit_app.py`, `packages.txt`, la CI GitHub
 Actions et la configuration Streamlit. Voir `DEPLOYMENT_STREAMLIT_CLOUD.md`.
+
+
+## Identité visuelle
+
+L'application publique utilise l'identité **CGS - Harmonisation Douanière** de CREATIV GROUP SARL,
+avec une charte gris / rouge bordeaux. Le même lockup est repris dans les exports Excel, Word et PDF.
+
+Pour utiliser le fichier officiel exact du logo CREATIV GROUP, déposer un PNG validé à l'emplacement :
+
+`assets/creativ_group_logo.png`
+
+Aucun changement de code n'est nécessaire : l'interface et les exports le détectent automatiquement.
