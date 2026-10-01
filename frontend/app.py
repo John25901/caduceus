@@ -6,14 +6,15 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from backend.app.core.branding import brand_logo_data_uri, brand_logo_png
+
 API_BASE = os.getenv("CADUCEUS_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 INTERNAL_TOP_K = 5  # Paramètre moteur, volontairement masqué à l'utilisateur métier.
 
 st.set_page_config(page_title="CGS - Harmonisation Douanière", layout="wide")
 
 # Charte visuelle CREATIV GROUP SARL : gris + rouge bordeaux.
-st.markdown(
-    """
+CGS_CSS = """
 <style>
 :root {
   --cgs-bordeaux: #982040;
@@ -23,33 +24,36 @@ st.markdown(
   --cgs-gray: #6d7076;
   --cgs-gray-light: #e7e7e9;
   --cgs-surface: #f5f5f6;
-  --cgs-white: #ffffff;
 }
-
 .stApp { background: var(--cgs-surface); color: #25272b; }
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
 [data-testid="stSidebar"] { background: var(--cgs-charcoal); border-right: 4px solid var(--cgs-bordeaux); }
-[data-testid="stSidebar"] * { color: #f4f4f4; }
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span:not([data-baseweb="tag"] span) { color: #f4f4f4; }
 [data-testid="stSidebar"] input,
-[data-testid="stSidebar"] textarea,
-[data-testid="stSidebar"] [data-baseweb="select"] * { color: #f4f4f4 !important; }
-[data-testid="stSidebar"] hr { border-color: #55585e; }
-
+[data-testid="stSidebar"] textarea { color: #25272b !important; background: #ffffff !important; }
+[data-testid="stSidebar"] hr { border-color: #56585d; }
 .cgs-brand-header {
-  background: linear-gradient(120deg, #ffffff 0%, #f6f6f7 72%, #f4e8ec 100%);
+  display: flex;
+  align-items: center;
+  gap: 1.35rem;
+  background: linear-gradient(120deg, #ffffff 0%, #f7f7f8 76%, #f4e8ec 100%);
   border-left: 7px solid var(--cgs-bordeaux);
   border-bottom: 1px solid #d8d8db;
-  border-radius: 8px;
-  padding: 1.15rem 1.35rem 1.05rem 1.35rem;
+  border-radius: 9px;
+  padding: 1rem 1.25rem;
   margin: 0 0 1.1rem 0;
-  box-shadow: 0 2px 8px rgba(25, 25, 28, .05);
+  box-shadow: 0 2px 10px rgba(25,25,28,.06);
 }
-.cgs-brand-kicker { color: var(--cgs-bordeaux); font-size: .78rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; margin-bottom: .2rem; }
-.cgs-brand-title { color: #24262a; font-size: 2.15rem; font-weight: 800; line-height: 1.12; margin: 0; }
-.cgs-brand-subtitle { color: #62656b; font-size: .98rem; margin-top: .45rem; max-width: 1050px; }
-.cgs-sidebar-brand { border-bottom: 1px solid #5a5c61; padding: .15rem 0 1rem 0; margin-bottom: .8rem; }
-.cgs-sidebar-brand strong { color: #ffffff !important; font-size: 1.05rem; }
-.cgs-sidebar-brand span { color: #d8d8db !important; font-size: .78rem; }
-
+.cgs-brand-header img { width: 205px; max-width: 26%; height: auto; object-fit: contain; }
+.cgs-brand-copy { min-width: 0; }
+.cgs-brand-kicker { color: var(--cgs-bordeaux); font-size: .76rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.cgs-brand-title { color: #24262a; font-size: 2.05rem; font-weight: 800; line-height: 1.12; margin-top: .15rem; }
+.cgs-brand-subtitle { color: #62656b; font-size: .95rem; margin-top: .42rem; max-width: 980px; }
 .stButton > button, .stDownloadButton > button {
   border-radius: 6px;
   border: 1px solid var(--cgs-bordeaux) !important;
@@ -70,15 +74,36 @@ button[data-baseweb="tab"][aria-selected="true"] { color: var(--cgs-bordeaux) !i
 [data-testid="stDataFrame"] { border: 1px solid #d4d4d7; border-radius: 6px; overflow: hidden; }
 div[data-testid="stAlert"] { border-radius: 6px; }
 hr { border-color: #d9d9dc; }
+@media (max-width: 780px) {
+  .cgs-brand-header { align-items: flex-start; gap: .8rem; padding: .85rem; }
+  .cgs-brand-header img { width: 130px; max-width: 35%; }
+  .cgs-brand-title { font-size: 1.55rem; }
+  .cgs-brand-subtitle { font-size: .86rem; }
+}
 </style>
+"""
+
+# st.html évite que le CSS/HTML soit rendu comme texte Markdown sur Community Cloud.
+if hasattr(st, "html"):
+    st.html(CGS_CSS)
+else:  # Compatibilité avec d'anciennes installations locales.
+    st.markdown(CGS_CSS, unsafe_allow_html=True)
+
+logo_uri = brand_logo_data_uri(compact=True)
+header_html = f"""
 <div class="cgs-brand-header">
-  <div class="cgs-brand-kicker">CREATIV GROUP SARL</div>
-  <div class="cgs-brand-title">CGS - Harmonisation Douanière</div>
-  <div class="cgs-brand-subtitle">Plateforme propriétaire d'ingénierie douanière : ingestion documentaire, harmonisation tarifaire, contrôle de cohérence et rapports professionnels.</div>
+  <img src="{logo_uri}" alt="CREATIV GROUP SARL">
+  <div class="cgs-brand-copy">
+    <div class="cgs-brand-kicker">PLATEFORME PROPRIÉTAIRE · CREATIV GROUP SARL</div>
+    <div class="cgs-brand-title">CGS - Harmonisation Douanière</div>
+    <div class="cgs-brand-subtitle">Ingestion documentaire, harmonisation tarifaire, contrôle de cohérence et rapports professionnels.</div>
+  </div>
 </div>
-    """,
-    unsafe_allow_html=True,
-)
+"""
+if hasattr(st, "html"):
+    st.html(header_html)
+else:
+    st.markdown(header_html, unsafe_allow_html=True)
 
 
 def api_get(path: str, timeout: int = 30):
@@ -154,6 +179,9 @@ def _technical_table(payload: dict) -> pd.DataFrame:
 
 
 with st.sidebar:
+    st.image(brand_logo_png(compact=True), width=220)
+    st.caption("CGS - Harmonisation Douanière")
+    st.divider()
     st.subheader("Dossier")
     ref_client = st.text_input("Référence dossier", "DOSSIER-CREATIV-001")
     secteur = st.text_input("Secteur / activité", "")
