@@ -6,12 +6,12 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from backend.app.core.branding import brand_logo_data_uri, brand_logo_png
+from backend.app.core.branding import brand_favicon_image, brand_logo_data_uri, brand_logo_png
 
 API_BASE = os.getenv("CADUCEUS_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 INTERNAL_TOP_K = 5  # Paramètre moteur, volontairement masqué à l'utilisateur métier.
 
-st.set_page_config(page_title="CGS - Harmonisation Douanière", layout="wide")
+st.set_page_config(page_title="CGS - Harmonisation Douanière", page_icon=brand_favicon_image(), layout="wide")
 
 # Charte visuelle CREATIV GROUP SARL : gris + rouge bordeaux.
 CGS_CSS = """
@@ -112,6 +112,77 @@ def api_get(path: str, timeout: int = 30):
 
 def api_post(path: str, **kwargs):
     return requests.post(f"{API_BASE}{path}", **kwargs)
+
+
+def _normalize_error_payload(detail, *, status_code: int | None = None) -> dict:
+    if isinstance(detail, dict):
+        return {
+            "title": detail.get("title") or "Traitement impossible",
+            "message": detail.get("message") or "CGS n'a pas pu terminer cette opération.",
+            "hints": detail.get("hints") or [],
+            "details": detail.get("details") or {},
+            "code": detail.get("code"),
+        }
+    text = str(detail or "").strip()
+    if status_code == 413:
+        return {
+            "title": "Fichier trop volumineux",
+            "message": "Le document dépasse la taille autorisée par la plateforme.",
+            "hints": ["Compressez le document ou séparez-le en plusieurs fichiers."],
+            "details": {},
+            "code": "FILE_TOO_LARGE",
+        }
+    if status_code == 503:
+        return {
+            "title": "Service temporairement indisponible",
+            "message": "Un composant de CGS n'est pas encore disponible. Réessayez dans quelques instants.",
+            "hints": [],
+            "details": {},
+            "code": "SERVICE_UNAVAILABLE",
+        }
+    return {
+        "title": "Traitement impossible",
+        "message": text or "CGS n'a pas pu terminer cette opération.",
+        "hints": ["Vérifiez le document puis réessayez. Si l'erreur persiste, utilisez le fichier source original."],
+        "details": {},
+        "code": None,
+    }
+
+
+def _show_user_error(error: dict) -> None:
+    title = error.get("title") or "Traitement impossible"
+    message = error.get("message") or "CGS n'a pas pu terminer cette opération."
+    hints = [str(x) for x in (error.get("hints") or []) if str(x).strip()]
+    st.toast(title, icon="⚠️")
+    st.error(f"**{title}**\n\n{message}")
+    if hints:
+        st.info("**Que faire ?**\n\n" + "\n".join(f"- {h}" for h in hints))
+    details = error.get("details") or {}
+    technical = details.get("technical_message") or details.get("reason")
+    if technical:
+        with st.expander("Détails techniques — équipe projet", expanded=False):
+            st.code(str(technical))
+
+
+def _show_response_error(response) -> None:
+    try:
+        body = response.json()
+        detail = body.get("detail", body) if isinstance(body, dict) else body
+    except Exception:
+        detail = None
+    _show_user_error(_normalize_error_payload(detail, status_code=getattr(response, "status_code", None)))
+
+
+def _show_exception_error(exc: Exception) -> None:
+    _show_user_error({
+        "title": "Connexion ou traitement interrompu",
+        "message": "CGS n'a pas pu terminer l'opération demandée.",
+        "hints": [
+            "Réessayez dans quelques instants.",
+            "Si le problème concerne une image, privilégiez l'original ou un PDF plutôt qu'une capture compressée.",
+        ],
+        "details": {"technical_message": str(exc)},
+    })
 
 
 def _business_observation(a: dict) -> str:
@@ -222,7 +293,7 @@ with st.sidebar:
             if ocr.get("available"):
                 st.caption(f"OCR : disponible ({ocr.get('engine', 'Tesseract')})")
             else:
-                st.caption("OCR images/scans : moteur à activer — lancez une fois install_ocr_windows.bat")
+                st.caption("OCR images/scans : indisponible sur cette instance — vérifiez le déploiement Tesseract.")
             llm = h.get("llm_arbitration") or {}
             configured_ai = [p for p in (llm.get("providers") or []) if p.get("configured")]
             if configured_ai:
@@ -265,9 +336,9 @@ with mapping_tab:
                         p = r.json()
                         st.session_state["preview_v22"] = p
                     else:
-                        st.error(r.text)
+                        _show_response_error(r)
                 except Exception as exc:
-                    st.error(str(exc))
+                    _show_exception_error(exc)
         with c2:
             if st.button("Harmoniser la liste", type="primary"):
                 with st.spinner("Analyse de la liste et rapprochement avec le référentiel douanier…"):
@@ -412,7 +483,7 @@ with mapping_tab:
                         mime="application/pdf",
                     )
         except Exception as exc:
-            st.error(f"Export indisponible : {exc}")
+            _show_exception_error(exc)
 
         with st.expander("Cycle d'amélioration / réimport", expanded=False):
             st.write(
@@ -442,7 +513,7 @@ with mapping_tab:
                         if info.get("invalid_codes"):
                             st.warning("Certaines positions ne sont pas présentes dans le référentiel douanier et n'ont pas été mémorisées.")
                     else:
-                        st.error(rr.text)
+                        _show_response_error(rr)
                 except Exception as exc:
                     st.error(str(exc))
 
@@ -531,7 +602,7 @@ with eval_tab:
             with st.spinner("Évaluation en cours…"):
                 r = api_post("/api/v2/evaluation/run-lexical-baseline?max_cases=200", timeout=900)
                 if r.ok: st.success("Mesure enregistrée.")
-                else: st.error(r.text)
+                else: _show_response_error(r)
     models = [
         ("MiniLM multilingue", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
         ("E5 multilingue", "intfloat/multilingual-e5-small"),
