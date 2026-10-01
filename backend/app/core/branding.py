@@ -4,7 +4,7 @@ import base64
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFile, ImageFont, ImageOps
 
 from backend.app.core.official_logo_data import OFFICIAL_CREATIV_LOGO_B64
 
@@ -81,7 +81,19 @@ def brand_logo_png(*, compact: bool = False) -> bytes:
     try:
         data = base64.b64decode(OFFICIAL_CREATIV_LOGO_B64, validate=True)
         if data.startswith(b"\x89PNG\r\n\x1a\n"):
-            return data
+            # Re-encode through Pillow. This normalizes the embedded PNG and avoids
+            # compatibility issues with strict Office PNG parsers.
+            previous = ImageFile.LOAD_TRUNCATED_IMAGES
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
+            try:
+                embedded = Image.open(io.BytesIO(data))
+                embedded.load()
+                embedded = embedded.convert("RGBA")
+                out = io.BytesIO()
+                embedded.save(out, format="PNG", optimize=True)
+                return out.getvalue()
+            finally:
+                ImageFile.LOAD_TRUNCATED_IMAGES = previous
     except Exception:
         pass
     return _generated_logo_png(compact=compact)
