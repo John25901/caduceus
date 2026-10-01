@@ -8,8 +8,8 @@ from PIL import Image, ImageDraw, ImageFile, ImageFont, ImageOps
 
 from backend.app.core.official_logo_data import OFFICIAL_CREATIV_LOGO_B64
 
-BORDEAUX = "#982040"
-BORDEAUX_DARK = "#74172F"
+BORDEAUX = "#A02041"
+BORDEAUX_DARK = "#7D1933"
 CHARCOAL = "#2F3136"
 GRAY = "#6D7076"
 LIGHT = "#F5F5F6"
