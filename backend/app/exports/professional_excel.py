@@ -110,8 +110,9 @@ def build_professional_excel(
     # Entête corporate CREATIV GROUP / CGS.
     logo_stream = io.BytesIO(brand_logo_png(compact=True))
     logo = XLImage(logo_stream)
-    logo.width = 165
-    logo.height = 40
+    # Preserve the official logo proportions (624 × 400).
+    logo.width = 105
+    logo.height = 67
     ws.add_image(logo, "A1")
 
     ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_main_col)
@@ -119,7 +120,7 @@ def build_professional_excel(
     title.font = Font(bold=True, size=15, color=GREEN_DARK)
     title.alignment = Alignment(horizontal="center", vertical="center")
     title.fill = PatternFill("solid", fgColor=GREEN_LIGHT)
-    ws.row_dimensions[1].height = 34
+    ws.row_dimensions[1].height = 52
 
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_main_col)
     context_parts = [f"Source : {source_filename}"]
