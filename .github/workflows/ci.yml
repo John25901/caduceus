@@ -1,4 +1,4 @@
-name: CADUCEUS CI
+name: CGS CI
 
 on:
   push:
