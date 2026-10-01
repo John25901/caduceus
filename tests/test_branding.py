@@ -3,7 +3,7 @@ from backend.app.core.branding import brand_favicon_image, brand_logo_data_uri, 
 
 def test_brand_logo_png_is_valid_png():
     data = brand_logo_png(compact=True)
-    assert data.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(data) > 1000
 
 
