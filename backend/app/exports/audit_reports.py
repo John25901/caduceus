@@ -170,11 +170,11 @@ def build_audit_pdf(
     css = """
     @page { size: A4 landscape; margin: 28pt; }
     body { font-family: sans-serif; font-size: 9pt; color: #111; }
-    h1 { text-align: center; font-size: 17pt; background: #F4E8EC; border-left: 6pt solid #982040; padding: 8pt; }
+    h1 { text-align: center; font-size: 17pt; background: #F4E8EC; border-left: 6pt solid #A02041; padding: 8pt; }
     h2 { font-size: 12pt; margin-top: 14pt; }
     table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
     th, td { border: 0.6pt solid #333; padding: 4pt; vertical-align: top; }
-    th { background: #982040; color: #fff; font-weight: bold; }
+    th { background: #A02041; color: #fff; font-weight: bold; }
     .meta th { width: 25%; text-align: left; }
     .summary th, .summary td { text-align: center; }
     .note { margin-top: 14pt; font-size: 8.5pt; }
