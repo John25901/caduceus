@@ -1,4 +1,4 @@
-# Déploiement CADUCEUS V2.6 — GitHub + Streamlit Community Cloud
+# Déploiement CGS - Harmonisation Douanière — GitHub + Streamlit Community Cloud
 
 ## Architecture déployée
 
@@ -22,7 +22,7 @@ Créer un dépôt privé, par exemple `caduceus`, puis depuis ce dossier :
 ```bash
 git init
 git add .
-git commit -m "CADUCEUS V2.6 deploy"
+git commit -m "CGS branding deploy"
 git branch -M main
 git remote add origin https://github.com/VOTRE_COMPTE/caduceus.git
 git push -u origin main
