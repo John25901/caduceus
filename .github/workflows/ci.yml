@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --prefer-binary -r requirements-dev.txt
+          pip install --prefer-binary -r requirements-ci.txt
 
       - name: Syntax check
         run: python -m compileall -q backend frontend scripts streamlit_app.py
