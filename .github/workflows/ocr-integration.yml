@@ -1,0 +1,45 @@
+name: CGS OCR integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ocr-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CADUCEUS_HOME: /tmp/cgs-ocr-ci
+      CADUCEUS_ENABLE_SEMANTIC: "0"
+      CADUCEUS_ENABLE_LLM_ARBITRATION: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Tesseract only for explicit OCR integration test
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -r requirements-dev.txt
+
+      - name: OCR capability smoke test
+        run: |
+          python - <<'PY'
+          from backend.app.ingestion.document_parser import UniversalEquipmentParser
+          caps = UniversalEquipmentParser().capabilities()
+          print(caps["ocr"])
+          assert caps["ocr"]["available"], caps["ocr"]
+          assert ".webp" in caps["extensions"]
+          PY
