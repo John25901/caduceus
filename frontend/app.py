@@ -17,8 +17,8 @@ st.set_page_config(page_title="CGS - Harmonisation Douanière", page_icon=brand_
 CGS_CSS = """
 <style>
 :root {
-  --cgs-bordeaux: #982040;
-  --cgs-bordeaux-dark: #74172f;
+  --cgs-bordeaux: #A02041;
+  --cgs-bordeaux-dark: #7D1933;
   --cgs-bordeaux-soft: #f4e8ec;
   --cgs-charcoal: #2f3136;
   --cgs-gray: #6d7076;
