@@ -17,6 +17,7 @@ from backend.app.currency.exchange import ExchangeRateService
 from backend.app.exports.audit_reports import build_audit_docx, build_audit_pdf
 from backend.app.exports.professional_excel import build_professional_excel
 from backend.app.ingestion.document_parser import UniversalEquipmentParser
+from backend.app.ingestion.errors import IngestionError, ingestion_error_payload
 from backend.app.metrics.performance import PerformanceProbe
 from backend.app.quality.normalization import apply_professional_normalization
 from backend.app.sector.coherence import assess_sector, infer_project_profile
@@ -336,7 +337,8 @@ async def preview_bordereau(request: Request, file: UploadFile = File(...)):
         s.metrics.record_runtime("PREVIEW_BORDEREAU", snap)
     except Exception as exc:
         s.metrics.record_runtime("PREVIEW_BORDEREAU_ERROR", details={"filename": file.filename, "error": str(exc)})
-        raise HTTPException(status_code=400, detail=str(exc))
+        detail = ingestion_error_payload(exc)
+        raise HTTPException(status_code=422 if isinstance(exc, IngestionError) else 400, detail=detail)
     response = parsed.as_metadata()
     response["preview"] = [i.model_dump(mode="json", exclude={"raw_fields"}) for i in parsed.items[:20]]
     return response
@@ -504,7 +506,8 @@ async def process_bordereau(
             s.metrics.record_runtime("PROCESS_BORDEREAU_ERROR", perf)
         except Exception:
             pass
-        raise HTTPException(status_code=400, detail=str(exc))
+        detail = ingestion_error_payload(exc)
+        raise HTTPException(status_code=422 if isinstance(exc, IngestionError) else 400, detail=detail)
 
     return {
         "reference_prospect": reference_prospect,
