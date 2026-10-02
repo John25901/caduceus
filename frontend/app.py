@@ -315,10 +315,10 @@ with mapping_tab:
     st.subheader("1. Importer la liste du client")
     uploaded = st.file_uploader(
         "Document client",
-        type=["xlsx", "xls", "csv", "txt", "docx", "pdf", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
+        type=["xlsx", "xls", "csv", "txt", "docx", "pdf", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"],
         help=(
             "Excel/CSV : détection automatique des en-têtes. Word/PDF : extraction native des tableaux et du texte. "
-            "Images et pages PDF scannées : OCR Tesseract à la demande."
+            "Images et pages PDF scannées : OCR adaptatif multi-passes. Les formats non standards sont analysés avant d’être convertis en lignes d’équipements."
         ),
     )
 
@@ -372,6 +372,14 @@ with mapping_tab:
             source_sheet = p.get("source_sheet")
             details = f" — feuille « {source_sheet} »" if source_sheet else ""
             ocr_note = f" — {p.get('pages_ocr')} page(s) OCR" if p.get("pages_ocr") else ""
+            document_label = p.get("document_label")
+            document_conf = p.get("document_confidence")
+            ocr_conf = p.get("ocr_confidence")
+            if document_label:
+                conf_text = f" ({float(document_conf) * 100:.0f} %)" if document_conf is not None else ""
+                st.success(f"Type de document reconnu : {document_label}{conf_text}.")
+            if ocr_conf is not None:
+                st.caption(f"Qualité OCR estimée : {float(ocr_conf) * 100:.0f} %. Les champs incertains restent vides plutôt que d'être inventés.")
             st.info(f"{p['items_count']} articles détectés — {source_type} / {method}{details}{ocr_note}.")
             if p.get("warnings"):
                 for w in p["warnings"]:
