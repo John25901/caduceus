@@ -325,7 +325,7 @@ async def preview_bordereau(request: Request, file: UploadFile = File(...)):
     data = await file.read()
     try:
         with PerformanceProbe() as probe:
-            parsed = UniversalEquipmentParser().parse_bytes(data, file.filename or "upload")
+            parsed = UniversalEquipmentParser().parse_bytes(data, file.filename or "upload", inspection_only=True)
             snap = probe.finish({
                 "filename": file.filename,
                 "items_count": len(parsed.items),
