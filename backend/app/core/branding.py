@@ -75,8 +75,23 @@ def brand_logo_png(*, compact: bool = False) -> bytes:
     """
     if OFFICIAL_LOGO_PATH.exists():
         try:
-            return OFFICIAL_LOGO_PATH.read_bytes()
+            data = OFFICIAL_LOGO_PATH.read_bytes()
+            # Never trust a deployment asset blindly: validate and normalize it
+            # before Streamlit, openpyxl or python-docx consume the bytes.
+            previous = ImageFile.LOAD_TRUNCATED_IMAGES
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
+            try:
+                image = Image.open(io.BytesIO(data))
+                image.load()
+                image = ImageOps.exif_transpose(image).convert("RGBA")
+                out = io.BytesIO()
+                image.save(out, format="PNG", optimize=True)
+                return out.getvalue()
+            finally:
+                ImageFile.LOAD_TRUNCATED_IMAGES = previous
         except Exception:
+            # Fall back to the embedded validated logo rather than breaking the UI
+            # or professional exports because of a damaged repository asset.
             pass
     try:
         data = base64.b64decode(OFFICIAL_CREATIV_LOGO_B64, validate=True)
