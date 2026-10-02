@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from backend.app.ingestion.common import ParsedDocument
+from backend.app.ingestion.document_classifier import classify_document
 from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import TesseractOCR
 from backend.app.ingestion.tabular_parser import TabularEquipmentParser, detect_header_row
@@ -331,6 +332,103 @@ def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1
             extraction_confidence=0.62,
             raw_fields={"raw_ocr_line": line},
         ))
+    return out
+
+
+def parse_adaptive_equipment_text(
+    text: str,
+    filename: str,
+    *,
+    source_page: int = 1,
+    method: str = "OCR_IMAGE_ADAPTIVE",
+) -> list[EquipmentItem]:
+    """Recover non-standard equipment lists without inventing missing fields.
+
+    This fallback is only called after the document classifier has identified an
+    equipment/proforma context. It accepts designation-only rows, quantity+unit
+    rows and numbered lists, but leaves unreadable price/unit fields empty.
+    """
+    # Numbered equipment schedules are common even when they have no prices.
+    numbered = parse_loose_text(
+        text,
+        filename,
+        source_page=source_page,
+        method=method,
+        require_commercial_structure=False,
+    )
+    if numbered:
+        return numbered
+
+    lines = [clean_text(x) for x in text.splitlines() if clean_text(x)]
+    currency = _guess_currency(text)
+    out: list[EquipmentItem] = []
+    skip_terms = (
+        "raison sociale", "address", "adresse", "telephone", "tel ", "fax",
+        "email", "e-mail", "bank", "account", "payment terms", "warranty",
+        "invoice no", "quotation no", "date:", "total", "subtotal",
+    )
+    equipment_terms = (
+        "machine", "equipment", "equipement", "materiel", "line", "ligne",
+        "conveyor", "convoyeur", "pump", "pompe", "motor", "moteur",
+        "compressor", "compresseur", "mixer", "crusher", "broyeur",
+        "transformer", "transformateur", "generator", "generateur", "chiller",
+        "boiler", "dryer", "sechoir", "tank", "cuve", "furnace", "four",
+        "loader", "press", "mould", "mold", "moule", "printer", "imprimante",
+        "panel", "panneau", "cabinet", "armoire", "sensor", "capteur",
+        "valve", "vanne", "filter", "filtre", "solar cell", "junction box",
+        "back sheet", "inverter", "onduleur", "battery", "batterie",
+    )
+
+    for idx, line in enumerate(lines, start=1):
+        n = normalize_search_text(line)
+        if not n or any(term in n for term in skip_terms):
+            continue
+        if len(re.findall(r"[A-Za-zÀ-ÿ]", line)) < 3:
+            continue
+        # Header rows are context, not equipment.
+        if n in {
+            "designation", "description", "item", "article", "equipment",
+            "equipement", "materiel", "quantity", "quantite", "qty", "qte",
+            "unit", "unite", "unit price", "prix unitaire", "amount", "montant",
+        }:
+            continue
+
+        serial_match = re.match(r"^\s*(\d{1,4})\s*[.)-]?\s+(.+)$", line)
+        serial = int(serial_match.group(1)) if serial_match else None
+        body = serial_match.group(2).strip() if serial_match else line.strip()
+
+        qty = None
+        unit = None
+        designation = body
+
+        # Flexible "designation ... quantity unit" form with no mandatory price.
+        qmatch = re.match(rf"^(?P<d>.+?[A-Za-zÀ-ÿ].*?)\s+(?P<q>{_NUM})\s*(?P<u>{_UNIT_RE})$", body, re.IGNORECASE)
+        if qmatch:
+            designation = qmatch.group("d").strip(" :-")
+            qty = _number(qmatch.group("q"))
+            unit = qmatch.group("u")
+        else:
+            # Without a serial or quantity, require a clear equipment cue.
+            if serial is None and not any(term in n for term in equipment_terms):
+                continue
+
+        if not designation or _looks_like_total(designation):
+            continue
+        out.append(
+            EquipmentItem(
+                source_document=filename,
+                source_page=source_page,
+                source_row=serial or idx,
+                extraction_method=method,
+                designation_source=designation,
+                designation_normalisee=normalize_search_text(designation),
+                quantite=qty,
+                unite=unit,
+                devise=currency,
+                extraction_confidence=0.58 if serial is None else 0.68,
+                raw_fields={"raw_ocr_line": line, "adaptive_fallback": True},
+            )
+        )
     return out
 
 
