@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import pandas as pd
+from rapidfuzz import fuzz
 
 from backend.app.models.domain import EquipmentItem
 from backend.app.normalization.text import clean_text, normalize_hs_code, normalize_search_text
@@ -14,12 +15,12 @@ from backend.app.normalization.text import clean_text, normalize_hs_code, normal
 
 FIELD_SYNONYMS = {
     "order": ["n d ordre", "n° d ordre", "numero d ordre", "numéro d ordre", "no", "n°", "numero", "numéro", "serial", "sn", "s/n"],
-    "designation": ["designation", "désignation", "description", "equipement", "équipement", "equipment", "materiel", "matériel", "material", "article", "item", "name", "nom", "produit", "goods description"],
-    "specifications": ["specification", "specifications", "spec", "caracteristique", "caracteristiques", "technical description"],
-    "quantity": ["quantite", "quantité", "quantity", "qty", "qte"],
-    "unit": ["unite", "unit", "uom"],
-    "unit_price": ["prix unitaire", "unit price", "price usd", "price eur", "price xaf", "pu"],
-    "total_price": ["prix total", "total price", "amount", "amount usd", "amount eur", "amount xaf", "montant", "valeur totale", "fob en devise"],
+    "designation": ["designation", "désignation", "description", "description article", "product description", "item description", "equipment description", "equipement", "équipement", "equipment", "equipment name", "nom equipement", "nom équipement", "materiel", "matériel", "material", "article", "item", "item name", "name", "nom", "produit", "product", "goods description", "commodity description"],
+    "specifications": ["specification", "specifications", "spec", "specs", "caracteristique", "caracteristiques", "caractéristiques", "technical description", "technical specification", "model specification", "details", "detail"],
+    "quantity": ["quantite", "quantité", "quantity", "qty", "qte", "q.ty", "number", "nombre"],
+    "unit": ["unite", "unité", "unit", "uom", "unit of measure", "measure unit"],
+    "unit_price": ["prix unitaire", "unit price", "unit cost", "price/unit", "price usd", "price eur", "price xaf", "pu"],
+    "total_price": ["prix total", "total price", "line total", "total amount", "amount", "amount usd", "amount eur", "amount xaf", "montant", "montant total", "valeur totale", "fob en devise"],
     "origin": ["origine", "origin", "pays origine", "country of origin"],
     "hs_code": ["code sh", "hs code", "position tarifaire", "pos tarifaire", "pos. tarifaire", "tariff code"],
     "customs_label": ["libelle douanier", "customs label", "tariff description"],
@@ -82,6 +83,33 @@ def _map_columns(columns: list[object]) -> dict[str, object]:
                     best, best_score = col, score
         if best is not None and best_score > 0:
             out[field] = best
+            continue
+
+        # Adaptive fallback for non-standard supplier headers. Exact/containment
+        # matching above always wins; fuzzy matching is only used when there is
+        # no deterministic match and remains conservative to avoid column swaps.
+        fuzzy_best = None
+        fuzzy_best_score = 0.0
+        for col, norm in normalized.items():
+            if not norm:
+                continue
+            for syn in synonyms:
+                ns = normalize_search_text(syn)
+                if not ns:
+                    continue
+                score = float(fuzz.token_set_ratio(norm, ns))
+                if field == "unit" and any(x in norm for x in ("price", "prix", "amount", "montant")):
+                    score = 0.0
+                if field in {"unit_price", "total_price"} and score > 0:
+                    if any(tag in norm for tag in ("xaf", "fcfa", "cfa")):
+                        score += 4.0
+                if score > fuzzy_best_score:
+                    fuzzy_best = col
+                    fuzzy_best_score = score
+
+        threshold = 72.0 if field == "designation" else 80.0
+        if fuzzy_best is not None and fuzzy_best_score >= threshold:
+            out[field] = fuzzy_best
     return out
 
 
