@@ -30,6 +30,9 @@ class ParsedDocument:
     equipment_likelihood: float | None = None
     ocr_confidence: float | None = None
     raw_text_preview: str | None = None
+    captured_lines: list[dict] = field(default_factory=list)
+    captured_records: list[dict] = field(default_factory=list)
+    capture_completeness: float | None = None
 
     def as_metadata(self) -> dict:
         return {
@@ -50,4 +53,7 @@ class ParsedDocument:
             "equipment_likelihood": self.equipment_likelihood,
             "ocr_confidence": self.ocr_confidence,
             "raw_text_preview": self.raw_text_preview,
+            "captured_lines": self.captured_lines,
+            "captured_records": self.captured_records,
+            "capture_completeness": self.capture_completeness,
         }
