@@ -24,6 +24,11 @@ class ParsedDocument:
     pages_total: int | None = None
     pages_ocr: int = 0
     raw_text_chars: int = 0
+    document_kind: str | None = None
+    document_label: str | None = None
+    document_confidence: float | None = None
+    equipment_likelihood: float | None = None
+    ocr_confidence: float | None = None
 
     def as_metadata(self) -> dict:
         return {
@@ -37,5 +42,10 @@ class ParsedDocument:
             "pages_total": self.pages_total,
             "pages_ocr": self.pages_ocr,
             "raw_text_chars": self.raw_text_chars,
+            "document_kind": self.document_kind,
+            "document_label": self.document_label,
+            "document_confidence": self.document_confidence,
+            "equipment_likelihood": self.equipment_likelihood,
+            "ocr_confidence": self.ocr_confidence,
             "items_count": len(self.items),
         }
