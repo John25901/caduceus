@@ -109,11 +109,21 @@ def brand_logo_image(*, compact: bool = False) -> Image.Image:
 
 
 def brand_favicon_image(size: int = 64) -> Image.Image:
-    """Square favicon derived from the official logo for the browser tab."""
+    """Square favicon derived from the official C/G emblem."""
     source = brand_logo_image(compact=True)
     bbox = source.getbbox()
     if bbox:
         source = source.crop(bbox)
+
+    # The official vertical logo places the C/G emblem in its upper half.
+    # Crop that area for a legible browser-tab icon instead of shrinking the
+    # complete wordmark into an unreadable square.
+    w, h = source.size
+    if h >= int(w * 0.55):
+        top = source.crop((int(w * 0.18), 0, int(w * 0.82), int(h * 0.58)))
+        if top.getbbox():
+            source = top
+
     source.thumbnail((size - 8, size - 8), Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
     x = (size - source.width) // 2
