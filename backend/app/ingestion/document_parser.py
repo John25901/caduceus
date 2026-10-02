@@ -791,15 +791,29 @@ class UniversalEquipmentParser:
             ) from exc
 
         text = read.text
+        profile = classify_document(text)
+
+        # Pass 1: strict commercial structures.
         items = parse_loose_text(text, filename, source_page=1, method="OCR_IMAGE", require_commercial_structure=True)
         if not items:
             items = parse_ocr_commercial_lines(text, filename, source_page=1, method="OCR_IMAGE")
+
+        # Pass 2: only when the document itself looks like an equipment/proforma
+        # list, allow a schema-flexible designation fallback. Missing values stay
+        # empty instead of being guessed.
+        if not items and profile.equipment_likelihood >= 0.70:
+            items = parse_adaptive_equipment_text(text, filename, source_page=1, method="OCR_IMAGE_ADAPTIVE")
 
         warnings: list[str] = []
         if read.confidence < 55:
             warnings.append(
                 f"Qualité OCR moyenne/faible ({read.confidence:.0f} %). "
-                "CGS conserve uniquement les informations structurées détectées et n'invente pas les valeurs illisibles."
+                "CGS conserve uniquement les informations détectées et n'invente pas les valeurs illisibles."
+            )
+        if items and any((i.prix_unitaire is None or i.quantite is None) for i in items):
+            warnings.append(
+                "Structure non standard : certaines lignes ont été reconnues sans tous les champs commerciaux. "
+                "Les cellules absentes restent vides et doivent être confirmées si elles sont nécessaires au dossier."
             )
 
         if not items:
@@ -813,25 +827,59 @@ class UniversalEquipmentParser:
                         "des lignes d'équipements sans risque d'erreur."
                     ),
                     hints=[
+                        "Utilisez l'image originale plutôt qu'une capture compressée ou transférée plusieurs fois.",
                         "Recadrez le document afin que le tableau occupe la majorité de l'image.",
                         "Redressez la prise de vue et évitez ombres, reflets et flou de mouvement.",
-                        "Utilisez la photo originale ou le PDF fournisseur plutôt qu'une capture compressée.",
+                        "Si disponible, transmettez le PDF/Excel fournisseur : CGS l'exploitera sans OCR.",
                     ],
-                    details={"ocr": read.as_dict(), "extension": ext},
+                    details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
                 )
+
+            if profile.kind == "CONTACT_DIRECTORY":
+                raise IngestionError(
+                    code="DOCUMENT_HORS_PERIMETRE",
+                    title="Document lu, mais ce n'est pas une liste d'équipements",
+                    message=(
+                        "L'OCR a correctement identifié un annuaire / une liste de contacts. "
+                        "CGS ne l'envoie pas au moteur de classement douanier afin d'éviter de transformer "
+                        "des raisons sociales, adresses ou numéros de téléphone en faux équipements."
+                    ),
+                    hints=[
+                        "Chargez la liste d'équipements, la proforma, le devis fournisseur ou le bordereau à harmoniser.",
+                        "Si ce document accompagne un dossier, conservez-le comme pièce annexe mais ne l'utilisez pas comme nomenclature.",
+                    ],
+                    details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
+                )
+
+            if profile.equipment_likelihood >= 0.55:
+                raise IngestionError(
+                    code="OCR_EQUIPEMENT_STRUCTURE_INCOMPLETE",
+                    title="Liste d'équipements probable, structure encore incomplète",
+                    message=(
+                        "CGS reconnaît le contexte matériel, mais les lignes ne sont pas encore séparées avec "
+                        "une confiance suffisante pour lancer l'harmonisation automatiquement."
+                    ),
+                    hints=[
+                        "Essayez un recadrage plus serré sur le tableau.",
+                        "Conservez les numéros de ligne/colonnes visibles si possible.",
+                        "Utilisez l'original PDF/Excel lorsqu'il existe.",
+                    ],
+                    details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
+                )
+
             raise IngestionError(
                 code="OCR_STRUCTURE_NON_RECONNUE",
-                title="Tableau non reconnu automatiquement",
+                title="Document lu, mais structure métier non identifiée",
                 message=(
-                    "Le texte est lisible, mais CGS n'a pas identifié une structure commerciale suffisamment "
-                    "fiable (désignation, quantité, prix) pour créer les lignes."
+                    f"L'OCR a lu le document ({profile.label.lower()}), mais CGS ne dispose pas d'indices suffisants "
+                    "pour le convertir en lignes d'équipements sans risque d'erreur."
                 ),
                 hints=[
-                    "Vérifiez que l'image contient bien la zone du tableau ou de la proforma.",
-                    "Essayez un recadrage plus serré ou le PDF/Excel source.",
+                    "Vérifiez que le document contient réellement une nomenclature d'équipements ou une proforma.",
+                    "Le système accepte des formats non standards, mais ne convertit pas automatiquement tout tableau en équipements.",
                     "Aucune ligne n'a été inventée à partir du texte non structuré.",
                 ],
-                details={"ocr": read.as_dict(), "extension": ext},
+                details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
             )
 
         return ParsedDocument(
@@ -842,5 +890,10 @@ class UniversalEquipmentParser:
             pages_total=1,
             pages_ocr=1,
             raw_text_chars=len(text),
+            document_kind=profile.kind,
+            document_label=profile.label,
+            document_confidence=profile.confidence,
+            equipment_likelihood=profile.equipment_likelihood,
+            ocr_confidence=read.confidence / 100.0,
         )
 
