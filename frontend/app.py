@@ -315,7 +315,7 @@ with mapping_tab:
     st.subheader("1. Importer la liste du client")
     uploaded = st.file_uploader(
         "Document client",
-        type=["xlsx", "xls", "csv", "txt", "docx", "pdf", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
+        type=["xlsx", "xls", "csv", "txt", "docx", "pdf", "png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"],
         help=(
             "Excel/CSV : détection automatique des en-têtes. Word/PDF : extraction native des tableaux et du texte. "
             "Images et pages PDF scannées : OCR Tesseract à la demande."
@@ -380,6 +380,15 @@ with mapping_tab:
                 st.caption(f"Type de document détecté : **{doc_label}**{confidence_txt}.")
             if ocr_conf is not None:
                 st.caption(f"Qualité OCR mesurée : **{float(ocr_conf):.0f} %**.")
+            capture_quality = p.get("capture_completeness")
+            if capture_quality is not None:
+                pct = max(0.0, min(1.0, float(capture_quality)))
+                if pct >= 0.72:
+                    st.success(f"Qualité de recueil des données : {pct:.0%} — bonne")
+                elif pct >= 0.48:
+                    st.warning(f"Qualité de recueil des données : {pct:.0%} — moyenne, contrôle conseillé")
+                else:
+                    st.error(f"Qualité de recueil des données : {pct:.0%} — faible, ne pas valider sans contrôle")
             if p.get("items_count"):
                 st.info(f"{p['items_count']} articles détectés — {source_type} / {method}{details}{ocr_note}.")
             else:
@@ -406,6 +415,20 @@ with mapping_tab:
                     "origine": "Origine",
                 })
                 st.dataframe(preview_df, use_container_width=True, hide_index=True)
+            captured_records = p.get("captured_records") or []
+            if captured_records:
+                with st.expander("Données structurées capturées avant harmonisation", expanded=True):
+                    st.caption(
+                        "Ces données proviennent directement de l'OCR. Elles sont conservées même si le document "
+                        "ne correspond pas encore au schéma d'une liste d'équipements."
+                    )
+                    st.dataframe(pd.DataFrame(captured_records), use_container_width=True, hide_index=True)
+
+            captured_lines = p.get("captured_lines") or []
+            if captured_lines:
+                with st.expander("Lignes OCR capturées — contrôle de complétude", expanded=False):
+                    st.dataframe(pd.DataFrame(captured_lines), use_container_width=True, hide_index=True)
+
             if p.get("raw_text_preview"):
                 with st.expander("Texte détecté par OCR — contrôle de lecture", expanded=False):
                     st.code(p.get("raw_text_preview"), language=None)
