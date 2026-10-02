@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from backend.app.ingestion.common import ParsedDocument
+from backend.app.ingestion.data_capture import capture_label_value_records, capture_text_lines
 from backend.app.ingestion.document_profiler import profile_document_text
 from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import TesseractOCR
@@ -757,6 +758,16 @@ class UniversalEquipmentParser:
 
         text = read.text
         profile = profile_document_text(text)
+        captured_lines = capture_text_lines(text)
+        captured_records = capture_label_value_records(text)
+        capture_completeness = max(
+            0.0,
+            min(
+                1.0,
+                (read.confidence / 100.0) * (1.0 - min(0.85, read.low_confidence_ratio))
+                + min(read.token_count, 120) / 1200.0,
+            ),
+        )
         items = parse_loose_text(text, filename, source_page=1, method="OCR_IMAGE", require_commercial_structure=True)
         if not items:
             items = parse_ocr_commercial_lines(text, filename, source_page=1, method="OCR_IMAGE")
@@ -800,6 +811,9 @@ class UniversalEquipmentParser:
                     equipment_likelihood=profile.equipment_likelihood,
                     ocr_confidence=read.confidence,
                     raw_text_preview=text[:1800],
+                    captured_lines=captured_lines,
+                    captured_records=captured_records,
+                    capture_completeness=capture_completeness,
                 )
 
             if low_quality:
@@ -863,5 +877,8 @@ class UniversalEquipmentParser:
             equipment_likelihood=profile.equipment_likelihood,
             ocr_confidence=read.confidence,
             raw_text_preview=text[:1800],
+            captured_lines=captured_lines,
+            captured_records=captured_records,
+            capture_completeness=capture_completeness,
         )
 
