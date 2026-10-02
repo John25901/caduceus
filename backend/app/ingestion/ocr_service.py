@@ -116,11 +116,13 @@ class TesseractOCR:
 
         w, h = image.size
         longest = max(w, h)
-        if longest < 1600:
-            scale = min(3.0, 1600.0 / max(1, longest))
+        if longest < 2200:
+            # Supplier screenshots and messaging-app images often need stronger
+            # enlargement before Tesseract can separate small glyphs.
+            scale = min(4.0, 2200.0 / max(1, longest))
             return image.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
-        if longest > 3200:
-            scale = 3200.0 / longest
+        if longest > 3600:
+            scale = 3600.0 / longest
             return image.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
         return image
 
@@ -240,14 +242,21 @@ class TesseractOCR:
             return first
 
         # Recovery path for blurred screenshots, sparse invoices and low contrast.
+        # PSM 3/4 are important for supplier tables where columns/blocks do not
+        # follow a single uniform text flow; PSM 11 recovers sparse labels.
         plan = [
+            (variants[0], 4),
             (variants[0], 11),
+            (variants[1], 3),
             (variants[1], 6),
             (variants[2], 6),
         ]
         for (strategy, variant), psm in plan:
             try:
-                attempts.append(self._read_once(variant, strategy=strategy, psm=psm))
+                candidate = self._read_once(variant, strategy=strategy, psm=psm)
+                attempts.append(candidate)
+                if candidate.confidence >= 80 and candidate.token_count >= 12 and len(candidate.text) >= 80:
+                    break
             except Exception:
                 continue
 
