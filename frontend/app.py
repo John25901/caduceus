@@ -372,7 +372,21 @@ with mapping_tab:
             source_sheet = p.get("source_sheet")
             details = f" — feuille « {source_sheet} »" if source_sheet else ""
             ocr_note = f" — {p.get('pages_ocr')} page(s) OCR" if p.get("pages_ocr") else ""
-            st.info(f"{p['items_count']} articles détectés — {source_type} / {method}{details}{ocr_note}.")
+            doc_label = p.get("document_label")
+            doc_conf = p.get("document_confidence")
+            ocr_conf = p.get("ocr_confidence")
+            if doc_label:
+                confidence_txt = f" ({float(doc_conf):.0%})" if doc_conf is not None else ""
+                st.caption(f"Type de document détecté : **{doc_label}**{confidence_txt}.")
+            if ocr_conf is not None:
+                st.caption(f"Qualité OCR mesurée : **{float(ocr_conf):.0f} %**.")
+            if p.get("items_count"):
+                st.info(f"{p['items_count']} articles détectés — {source_type} / {method}{details}{ocr_note}.")
+            else:
+                st.info(
+                    f"Document lu — {source_type} / {method}{details}{ocr_note}. "
+                    "Aucune ligne d'équipement n'a été créée automatiquement."
+                )
             if p.get("warnings"):
                 for w in p["warnings"]:
                     st.warning(w)
@@ -392,6 +406,9 @@ with mapping_tab:
                     "origine": "Origine",
                 })
                 st.dataframe(preview_df, use_container_width=True, hide_index=True)
+            if p.get("raw_text_preview"):
+                with st.expander("Texte détecté par OCR — contrôle de lecture", expanded=False):
+                    st.code(p.get("raw_text_preview"), language=None)
 
     if "v22_result" in st.session_state:
         payload = st.session_state["v22_result"]

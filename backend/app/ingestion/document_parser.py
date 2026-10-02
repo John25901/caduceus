@@ -8,6 +8,7 @@ from typing import Iterable
 import pandas as pd
 
 from backend.app.ingestion.common import ParsedDocument
+from backend.app.ingestion.document_profiler import profile_document_text
 from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import TesseractOCR
 from backend.app.ingestion.tabular_parser import TabularEquipmentParser, detect_header_row
@@ -334,6 +335,68 @@ def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1
     return out
 
 
+def parse_adaptive_equipment_lines(
+    text: str,
+    filename: str,
+    *,
+    source_page: int = 1,
+    method: str = "OCR_IMAGE_ADAPTIVE",
+) -> list[EquipmentItem]:
+    """Recover designation-only equipment lines from non-standard OCR layouts.
+
+    This fallback is intentionally gated by document profiling before it is called.
+    It never runs for generic/contact documents and therefore avoids turning
+    arbitrary OCR text into customs items.
+    """
+    profile = profile_document_text(text)
+    if profile.equipment_likelihood < 0.62:
+        return []
+
+    lines = [clean_text(x) for x in text.splitlines() if clean_text(x)]
+    out: list[EquipmentItem] = []
+    blacklist = {
+        "quotation", "invoice", "proforma", "description", "designation",
+        "quantity", "quantite", "unit", "unite", "price", "prix",
+        "total", "amount", "montant", "address", "adresse", "telephone",
+        "tel", "fax", "email",
+    }
+    equipment_words = (
+        "machine", "equipment", "equipement", "materiel", "pump", "pompe",
+        "compressor", "compresseur", "conveyor", "convoyeur", "motor", "moteur",
+        "chiller", "transformer", "transformateur", "generator", "generateur",
+        "dryer", "sechoir", "mixer", "melangeur", "crusher", "broyeur",
+        "tank", "cuve", "boiler", "chaudiere", "press", "printer", "imprimante",
+        "line", "ligne", "cabinet", "armoire", "tool", "outillage",
+    )
+
+    for pos, line in enumerate(lines, start=1):
+        n = normalize_search_text(line)
+        if not n or len(n) < 4 or len(n) > 180:
+            continue
+        if any(n == x or n.startswith(x + " ") for x in blacklist):
+            continue
+        if not any(word in n for word in equipment_words):
+            continue
+
+        # Strip a leading OCR serial number, but never fabricate quantity/price.
+        designation = re.sub(r"^\s*\d{1,4}\s*[.)-]?\s*", "", line).strip(" :-")
+        if len(designation) < 4:
+            continue
+        out.append(
+            EquipmentItem(
+                source_document=filename,
+                source_page=source_page,
+                source_row=pos,
+                extraction_method=method,
+                designation_source=designation,
+                designation_normalisee=normalize_search_text(designation),
+                extraction_confidence=0.58,
+                raw_fields={"raw_ocr_line": line, "adaptive_fallback": True},
+            )
+        )
+    return out
+
+
 class UniversalEquipmentParser:
     def __init__(self, *, enable_ocr: bool = True) -> None:
         self.tabular = TabularEquipmentParser()
@@ -351,7 +414,7 @@ class UniversalEquipmentParser:
         path = Path(path)
         return self.parse_bytes(path.read_bytes(), path.name)
 
-    def parse_bytes(self, data: bytes, filename: str) -> ParsedDocument:
+    def parse_bytes(self, data: bytes, filename: str, *, inspection_only: bool = False) -> ParsedDocument:
         ext = Path(filename).suffix.lower()
         if ext not in SUPPORTED_EXTENSIONS:
             raise IngestionError(
@@ -370,7 +433,7 @@ class UniversalEquipmentParser:
             return self._parse_docx(data, filename)
         if ext == ".pdf":
             return self._parse_pdf(data, filename)
-        return self._parse_image(data, filename)
+        return self._parse_image(data, filename, inspection_only=inspection_only)
 
     def _from_tabular(self, parsed, source_type: str, method: str) -> ParsedDocument:
         for item in parsed.items:
@@ -610,7 +673,7 @@ class UniversalEquipmentParser:
         finally:
             doc.close()
 
-    def _parse_image(self, data: bytes, filename: str) -> ParsedDocument:
+    def _parse_image(self, data: bytes, filename: str, *, inspection_only: bool = False) -> ParsedDocument:
         if not self.enable_ocr:
             raise IngestionError(
                 code="OCR_DESACTIVE",
@@ -693,9 +756,12 @@ class UniversalEquipmentParser:
             ) from exc
 
         text = read.text
+        profile = profile_document_text(text)
         items = parse_loose_text(text, filename, source_page=1, method="OCR_IMAGE", require_commercial_structure=True)
         if not items:
             items = parse_ocr_commercial_lines(text, filename, source_page=1, method="OCR_IMAGE")
+        if not items and profile.equipment_likelihood >= 0.62:
+            items = parse_adaptive_equipment_lines(text, filename, source_page=1, method="OCR_IMAGE_ADAPTIVE")
 
         warnings: list[str] = []
         if read.confidence < 55:
@@ -706,6 +772,36 @@ class UniversalEquipmentParser:
 
         if not items:
             low_quality = read.confidence < 50 or read.token_count < 8 or len(text.strip()) < 40
+
+            if inspection_only:
+                if low_quality:
+                    warnings.append(
+                        "Le texte détecté reste trop incertain pour créer des lignes douanières automatiquement."
+                    )
+                elif profile.kind == "DIRECTORY_CONTACTS":
+                    warnings.append(
+                        "Le document ressemble à un annuaire/répertoire de sociétés, pas à une liste d'équipements à harmoniser."
+                    )
+                else:
+                    warnings.append(
+                        "Le document est lisible mais sa structure ne correspond pas encore à une liste d'équipements exploitable."
+                    )
+                return ParsedDocument(
+                    items=[],
+                    source_type="IMAGE",
+                    extraction_method=f"OCR_TESSERACT/{read.strategy}/PSM{read.psm}",
+                    warnings=warnings,
+                    pages_total=1,
+                    pages_ocr=1,
+                    raw_text_chars=len(text),
+                    document_kind=profile.kind,
+                    document_label=profile.label,
+                    document_confidence=profile.confidence,
+                    equipment_likelihood=profile.equipment_likelihood,
+                    ocr_confidence=read.confidence,
+                    raw_text_preview=text[:1800],
+                )
+
             if low_quality:
                 raise IngestionError(
                     code="OCR_QUALITE_INSUFFISANTE",
@@ -715,26 +811,43 @@ class UniversalEquipmentParser:
                         "des lignes d'équipements sans risque d'erreur."
                     ),
                     hints=[
-                        "Recadrez le document afin que le tableau occupe la majorité de l'image.",
-                        "Redressez la prise de vue et évitez ombres, reflets et flou de mouvement.",
-                        "Utilisez la photo originale ou le PDF fournisseur plutôt qu'une capture compressée.",
+                        "Utilisez l'image originale plutôt qu'une capture compressée.",
+                        "Recadrez la zone utile et redressez la prise de vue.",
+                        "Si possible, fournissez le PDF ou le fichier Excel fournisseur.",
                     ],
-                    details={"ocr": read.as_dict(), "extension": ext},
+                    details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
                 )
+
+            if profile.kind == "DIRECTORY_CONTACTS":
+                raise IngestionError(
+                    code="DOCUMENT_HORS_PERIMETRE",
+                    title="Document lisible, mais hors périmètre d'harmonisation",
+                    message=(
+                        "CGS a correctement lu le document, mais il ressemble à un annuaire/répertoire de contacts "
+                        "et non à une liste d'équipements ou une proforma à harmoniser."
+                    ),
+                    hints=[
+                        "Vérifiez que le bon document a été chargé.",
+                        "Pour l'harmonisation douanière, fournissez la liste d'équipements, le devis, la proforma ou la facture correspondante.",
+                    ],
+                    details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
+                )
+
             raise IngestionError(
-                code="OCR_STRUCTURE_NON_RECONNUE",
-                title="Tableau non reconnu automatiquement",
+                code="STRUCTURE_EQUIPEMENT_NON_RECONNUE",
+                title="Document lisible, structure d'équipements non reconnue",
                 message=(
-                    "Le texte est lisible, mais CGS n'a pas identifié une structure commerciale suffisamment "
-                    "fiable (désignation, quantité, prix) pour créer les lignes."
+                    "CGS a lu le texte, mais n'a pas identifié avec assez de confiance les lignes d'équipements. "
+                    "Aucune ligne n'a été inventée."
                 ),
                 hints=[
-                    "Vérifiez que l'image contient bien la zone du tableau ou de la proforma.",
-                    "Essayez un recadrage plus serré ou le PDF/Excel source.",
-                    "Aucune ligne n'a été inventée à partir du texte non structuré.",
+                    "Le système accepte les tableaux non standards, mais il doit reconnaître au moins les désignations d'équipements.",
+                    "Essayez un recadrage plus serré si le tableau occupe une petite partie de l'image.",
+                    "Utilisez le document source PDF/Excel lorsqu'il est disponible.",
                 ],
-                details={"ocr": read.as_dict(), "extension": ext},
+                details={"ocr": read.as_dict(), "extension": ext, "document_profile": profile.as_dict()},
             )
+
 
         return ParsedDocument(
             items=_dedupe(items),
@@ -744,5 +857,11 @@ class UniversalEquipmentParser:
             pages_total=1,
             pages_ocr=1,
             raw_text_chars=len(text),
+            document_kind=profile.kind,
+            document_label=profile.label,
+            document_confidence=profile.confidence,
+            equipment_likelihood=profile.equipment_likelihood,
+            ocr_confidence=read.confidence,
+            raw_text_preview=text[:1800],
         )
 

@@ -57,3 +57,42 @@ def test_corrupt_webp_returns_friendly_ingestion_error():
     with pytest.raises(IngestionError) as exc:
         parser.parse_bytes(b"not-a-real-webp", "broken.webp")
     assert exc.value.code in {"IMAGE_ILLISIBLE", "WEBP_NON_SUPPORTE"}
+
+
+
+class _DirectoryOCR:
+    def status(self):
+        return OCRStatus(True, "fake", "fake", ("fra", "eng"))
+
+    def read_best(self, image):
+        return OCRReadResult(
+            text=(
+                "RAISON SOCIALE STE COMPTOIR AGRICOLE\n"
+                "ADRESSE RUE JABIR BEN HAYANE\n"
+                "TEL 0524434109 FAX 0524434614\n"
+                "RAISON SOCIALE STE AGRODEP\n"
+                "ADRESSE MARRAKECH\n"
+                "TEL 0524420252 FAX 0524430535"
+            ),
+            confidence=74.0,
+            strategy="enhanced",
+            psm=6,
+            token_count=28,
+        )
+
+
+def test_preview_can_inspect_non_equipment_image_without_fabricating_items():
+    parser = UniversalEquipmentParser()
+    parser.ocr = _DirectoryOCR()
+    parsed = parser.parse_bytes(_image_bytes("PNG"), "directory.png", inspection_only=True)
+    assert parsed.items == []
+    assert parsed.document_kind == "DIRECTORY_CONTACTS"
+    assert parsed.ocr_confidence == 74.0
+
+
+def test_processing_rejects_non_equipment_image_with_business_error():
+    parser = UniversalEquipmentParser()
+    parser.ocr = _DirectoryOCR()
+    with pytest.raises(IngestionError) as exc:
+        parser.parse_bytes(_image_bytes("PNG"), "directory.png")
+    assert exc.value.code == "DOCUMENT_HORS_PERIMETRE"
