@@ -62,9 +62,16 @@ def _guess_currency(text: str) -> str | None:
 
 def _looks_like_total(designation: str) -> bool:
     n = normalize_search_text(designation)
-    return (
-        ("total" in n and any(x in n for x in ("fob", "cif", "exw", "price", "amount", "montant")))
-        or n in {"total", "subtotal", "sous total", "grand total"}
+    if not n:
+        return False
+
+    # Summary rows often carry the amount on the same OCR line
+    # (e.g. "TOTAL 420 000"). They must never become equipment items.
+    if re.match(r"^(?:grand\s+total|sous\s+total|subtotal|total)\b", n):
+        return True
+
+    return "total" in n and any(
+        x in n for x in ("fob", "cif", "exw", "price", "amount", "montant")
     )
 
 
