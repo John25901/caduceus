@@ -167,10 +167,18 @@ class TesseractOCR:
         denoised = contrast.filter(ImageFilter.MedianFilter(size=3)).filter(
             ImageFilter.UnsharpMask(radius=1.2, percent=160, threshold=2)
         )
+        # A fixed low threshold deliberately removes coloured table borders
+        # while preserving dark printed text. On supplier screenshots this
+        # prevents grid lines from hiding quantities and monetary columns.
+        dark_threshold = int(os.getenv("CADUCEUS_OCR_DARK_TEXT_THRESHOLD", "140"))
+        dark_threshold = max(90, min(180, dark_threshold))
+        dark_text = gray.point(lambda x: 255 if x > dark_threshold else 0, mode="1").convert("L")
+
         threshold = self._otsu_threshold(contrast)
         binary = contrast.point(lambda x: 255 if x > threshold else 0, mode="1").convert("L")
         return [
             ("gentle", gentle),
+            ("dark_text", dark_text),
             ("enhanced", enhanced),
             ("denoised", denoised),
             ("binary", binary),
@@ -240,6 +248,22 @@ class TesseractOCR:
         )
 
     @staticmethod
+    def _looks_like_commercial_table(text: str) -> bool:
+        n = " ".join(
+            (text or "")
+            .lower()
+            .replace("é", "e")
+            .replace("è", "e")
+            .replace("ê", "e")
+            .split()
+        )
+        has_designation = any(x in n for x in ("designation", "description", "article", "item"))
+        has_quantity = any(x in n for x in ("quantite", "quantity", "qty", "qte"))
+        has_price = any(x in n for x in ("prix", "price"))
+        has_amount = any(x in n for x in ("montant", "amount", "total"))
+        return has_designation and has_quantity and has_price and has_amount
+
+    @staticmethod
     def _quality_score(result: OCRReadResult) -> float:
         # Confidence dominates; token count/text volume only break close ties.
         coverage = min(result.token_count, 140) * 0.10 + min(result.line_count, 35) * 0.22
@@ -258,17 +282,29 @@ class TesseractOCR:
         # PSM 4 is better suited to invoices/tables with multiple aligned text blocks.
         first = self._read_once(variants[0][1], strategy=variants[0][0], psm=4)
         attempts.append(first)
-        if first.confidence >= 74 and first.low_confidence_ratio <= 0.18 and first.token_count >= 12 and len(first.text) >= 60:
+        table_like = self._looks_like_commercial_table(first.text)
+        if (
+            not table_like
+            and first.confidence >= 74
+            and first.low_confidence_ratio <= 0.18
+            and first.token_count >= 12
+            and len(first.text) >= 60
+        ):
             return first
 
         # Recovery path for blurred screenshots, sparse invoices and low contrast.
+        # Commercial tables always receive one border-suppressed pass even when
+        # the first OCR confidence is high: confidence alone can be misleading
+        # when Tesseract reads labels but silently drops numeric columns.
         plan = [
+            (variants[1], 4),  # dark text / coloured-grid suppression
+            (variants[1], 6),
             (variants[0], 6),
             (variants[0], 11),
-            (variants[1], 4),
-            (variants[1], 6),
             (variants[2], 4),
-            (variants[3], 6),
+            (variants[2], 6),
+            (variants[3], 4),
+            (variants[4], 6),
         ]
         for (strategy, variant), psm in plan:
             try:
