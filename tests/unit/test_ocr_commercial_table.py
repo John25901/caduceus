@@ -60,3 +60,8 @@ def test_commercial_ocr_table_recovers_all_rows_and_values():
 
 def test_commercial_row_denominator_matches_visible_table():
     assert _estimate_commercial_row_count(OCR_TABLE_TEXT) == 15
+
+
+def test_total_row_with_inline_amount_is_never_an_item():
+    items = parse_ocr_commercial_lines("TOTAL 420 000", "table.png")
+    assert items == []
