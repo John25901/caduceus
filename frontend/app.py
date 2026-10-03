@@ -380,6 +380,16 @@ with mapping_tab:
                 st.caption(f"Type de document détecté : **{doc_label}**{confidence_txt}.")
             if ocr_conf is not None:
                 st.caption(f"Qualité OCR mesurée : **{float(ocr_conf):.0f} %**.")
+
+            expected_rows = p.get("table_rows_expected")
+            extracted_rows = p.get("table_rows_extracted")
+            arithmetic_rows = p.get("table_rows_arithmetic_ok")
+            if expected_rows:
+                st.caption(
+                    f"Lignes commerciales reconnues : **{int(extracted_rows or 0)}/{int(expected_rows)}** ; "
+                    f"cohérence Quantité × Prix unitaire = Montant : **{int(arithmetic_rows or 0)}/{int(expected_rows)}**."
+                )
+
             capture_quality = p.get("capture_completeness")
             if capture_quality is not None:
                 pct = max(0.0, min(1.0, float(capture_quality)))
