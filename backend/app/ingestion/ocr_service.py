@@ -32,6 +32,8 @@ class OCRReadResult:
     strategy: str
     psm: int
     token_count: int
+    line_count: int = 0
+    low_confidence_ratio: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,8 @@ class OCRReadResult:
             "strategy": self.strategy,
             "psm": self.psm,
             "token_count": self.token_count,
+            "line_count": self.line_count,
+            "low_confidence_ratio": round(self.low_confidence_ratio, 3),
             "text_chars": len(self.text),
         }
 
@@ -116,8 +120,8 @@ class TesseractOCR:
 
         w, h = image.size
         longest = max(w, h)
-        if longest < 1600:
-            scale = min(3.0, 1600.0 / max(1, longest))
+        if longest < 2200:
+            scale = min(3.2, 2200.0 / max(1, longest))
             return image.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
         if longest > 3200:
             scale = 3200.0 / longest
@@ -152,28 +156,31 @@ class TesseractOCR:
         return max(80, min(220, best))
 
     def _variants(self, image):
-        from PIL import ImageFilter, ImageOps
+        from PIL import ImageEnhance, ImageFilter, ImageOps
 
         rgb = self._resize_for_ocr(self._to_rgb(image))
         gray = ImageOps.grayscale(rgb)
         contrast = ImageOps.autocontrast(gray, cutoff=1)
-        enhanced = contrast.filter(ImageFilter.UnsharpMask(radius=1.6, percent=190, threshold=2))
+        gentle = ImageEnhance.Contrast(gray).enhance(1.25)
+        gentle = ImageEnhance.Sharpness(gentle).enhance(1.35)
+        enhanced = contrast.filter(ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=2))
         denoised = contrast.filter(ImageFilter.MedianFilter(size=3)).filter(
-            ImageFilter.UnsharpMask(radius=1.3, percent=175, threshold=2)
+            ImageFilter.UnsharpMask(radius=1.2, percent=160, threshold=2)
         )
         threshold = self._otsu_threshold(contrast)
         binary = contrast.point(lambda x: 255 if x > threshold else 0, mode="1").convert("L")
         return [
+            ("gentle", gentle),
             ("enhanced", enhanced),
             ("denoised", denoised),
             ("binary", binary),
         ]
 
     @staticmethod
-    def _frame_text(data) -> tuple[str, float, int]:
+    def _frame_text(data) -> tuple[str, float, int, int, float]:
         """Rebuild line-oriented text and compute mean confidence from Tesseract data."""
         if data is None or getattr(data, "empty", True):
-            return "", 0.0, 0
+            return "", 0.0, 0, 0, 1.0
 
         df = data.copy()
         if "text" not in df.columns or "conf" not in df.columns:
@@ -187,7 +194,7 @@ class TesseractOCR:
 
         tokens = df[(df["text"] != "") & (df["conf_num"].fillna(-1) >= 0)]
         if tokens.empty:
-            return "", 0.0, 0
+            return "", 0.0, 0, 0, 1.0
 
         group_cols = [c for c in ("page_num", "block_num", "par_num", "line_num") if c in tokens.columns]
         if group_cols:
@@ -197,13 +204,16 @@ class TesseractOCR:
                 if line:
                     lines.append(line)
             text = "\n".join(lines)
+            line_count = len(lines)
         else:
             text = " ".join(tokens["text"].tolist())
+            line_count = 1 if text.strip() else 0
 
         conf = float(tokens["conf_num"].mean()) if len(tokens) else 0.0
         if not math.isfinite(conf):
             conf = 0.0
-        return text.strip(), max(0.0, min(100.0, conf)), int(len(tokens))
+        low_ratio = float((tokens["conf_num"] < 45).mean()) if len(tokens) else 1.0
+        return text.strip(), max(0.0, min(100.0, conf)), int(len(tokens)), int(line_count), max(0.0, min(1.0, low_ratio))
 
     def _read_once(self, image, *, strategy: str, psm: int) -> OCRReadResult:
         if not self.status().available:
@@ -218,13 +228,24 @@ class TesseractOCR:
             output_type=pytesseract.Output.DATAFRAME,
             timeout=timeout,
         )
-        text, confidence, tokens = self._frame_text(data)
-        return OCRReadResult(text=text, confidence=confidence, strategy=strategy, psm=psm, token_count=tokens)
+        text, confidence, tokens, line_count, low_ratio = self._frame_text(data)
+        return OCRReadResult(
+            text=text,
+            confidence=confidence,
+            strategy=strategy,
+            psm=psm,
+            token_count=tokens,
+            line_count=line_count,
+            low_confidence_ratio=low_ratio,
+        )
 
     @staticmethod
     def _quality_score(result: OCRReadResult) -> float:
         # Confidence dominates; token count/text volume only break close ties.
-        return result.confidence + min(result.token_count, 80) * 0.12 + min(len(result.text), 1200) / 300.0
+        coverage = min(result.token_count, 140) * 0.10 + min(result.line_count, 35) * 0.22
+        text_bonus = min(len(result.text), 1800) / 360.0
+        uncertainty_penalty = result.low_confidence_ratio * 7.0
+        return result.confidence + coverage + text_bonus - uncertainty_penalty
 
     def read_best(self, image) -> OCRReadResult:
         if not self.status().available:
@@ -234,16 +255,20 @@ class TesseractOCR:
         attempts: list[OCRReadResult] = []
 
         # Fast path: most supplier scans work after contrast + sharpening.
-        first = self._read_once(variants[0][1], strategy=variants[0][0], psm=6)
+        # PSM 4 is better suited to invoices/tables with multiple aligned text blocks.
+        first = self._read_once(variants[0][1], strategy=variants[0][0], psm=4)
         attempts.append(first)
-        if first.confidence >= 72 and first.token_count >= 10 and len(first.text) >= 50:
+        if first.confidence >= 74 and first.low_confidence_ratio <= 0.18 and first.token_count >= 12 and len(first.text) >= 60:
             return first
 
         # Recovery path for blurred screenshots, sparse invoices and low contrast.
         plan = [
+            (variants[0], 6),
             (variants[0], 11),
+            (variants[1], 4),
             (variants[1], 6),
-            (variants[2], 6),
+            (variants[2], 4),
+            (variants[3], 6),
         ]
         for (strategy, variant), psm in plan:
             try:
