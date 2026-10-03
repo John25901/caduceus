@@ -390,6 +390,15 @@ with mapping_tab:
                     f"cohérence Quantité × Prix unitaire = Montant : **{int(arithmetic_rows or 0)}/{int(expected_rows)}**."
                 )
 
+            if p.get("ai_rescue_used"):
+                ai_provider = p.get("ai_provider") or "IA"
+                ai_model = p.get("ai_model") or ""
+                model_note = f" · {ai_model}" if ai_model else ""
+                st.info(
+                    f"Renfort IA multimodal activé : **{ai_provider}{model_note}**. "
+                    "Le résultat IA n'est retenu que s'il améliore la structure et passe les contrôles de cohérence."
+                )
+
             capture_quality = p.get("capture_completeness")
             if capture_quality is not None:
                 pct = max(0.0, min(1.0, float(capture_quality)))
@@ -398,7 +407,10 @@ with mapping_tab:
                 elif pct >= 0.48:
                     st.warning(f"Qualité de recueil des données : {pct:.0%} — moyenne, contrôle conseillé")
                 else:
-                    st.error(f"Qualité de recueil des données : {pct:.0%} — faible, ne pas valider sans contrôle")
+                    st.warning(
+                        f"Qualité de recueil des données : {pct:.0%} — faible. "
+                        "CGS conserve le dossier et applique les stratégies de récupération disponibles."
+                    )
             if p.get("items_count"):
                 st.info(f"{p['items_count']} articles détectés — {source_type} / {method}{details}{ocr_note}.")
             else:

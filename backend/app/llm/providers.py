@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import time
@@ -118,6 +119,91 @@ class OpenAICompatibleChatProvider:
             )
         except Exception as exc:
             return ProviderResponse(ok=False, latency_ms=(time.perf_counter() - started) * 1000.0, error=str(exc))
+
+
+    def complete_multimodal_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/png",
+        temperature: float = 0.0,
+        max_tokens: int = 1400,
+    ) -> ProviderResponse:
+        """OpenAI-compatible multimodal request with an inline base64 image.
+
+        Used only as a rescue path after local OCR. The provider receives the
+        source image plus the local OCR transcription so it can reconstruct
+        columns without being asked to invent missing values.
+        """
+        if not self.config.configured:
+            return ProviderResponse(ok=False, error=f"{self.config.name} non configuré.")
+        if not image_bytes:
+            return ProviderResponse(ok=False, error="Image vide.")
+
+        endpoint = self.config.base_url.rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        data_uri = f"data:{mime_type};base64,{encoded}"
+        payload: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                    ],
+                },
+            ],
+            "temperature": temperature,
+            "stream": False,
+        }
+        payload[self.config.max_tokens_field] = max_tokens
+        started = time.perf_counter()
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=self.timeout_seconds)
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            if not response.ok:
+                detail = response.text[:800]
+                return ProviderResponse(
+                    ok=False,
+                    latency_ms=latency_ms,
+                    error=f"HTTP {response.status_code}: {detail}",
+                    http_status=response.status_code,
+                )
+            data = response.json()
+            choices = data.get("choices") or []
+            if not choices:
+                return ProviderResponse(
+                    ok=False,
+                    latency_ms=latency_ms,
+                    error="Réponse IA sans choix.",
+                    http_status=response.status_code,
+                )
+            content = ((choices[0].get("message") or {}).get("content") or "").strip()
+            usage = data.get("usage") or {}
+            return ProviderResponse(
+                ok=True,
+                content=content,
+                latency_ms=latency_ms,
+                prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
+                completion_tokens=usage.get("completion_tokens") or usage.get("output_tokens"),
+                total_tokens=usage.get("total_tokens"),
+                http_status=response.status_code,
+            )
+        except Exception as exc:
+            return ProviderResponse(
+                ok=False,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                error=str(exc),
+            )
 
     @staticmethod
     def parse_json(text: str) -> dict[str, Any]:

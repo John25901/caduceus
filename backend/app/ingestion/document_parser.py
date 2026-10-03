@@ -7,12 +7,14 @@ from typing import Iterable
 
 import pandas as pd
 
+from backend.app.core.config import settings as app_settings
 from backend.app.ingestion.common import ParsedDocument
 from backend.app.ingestion.data_capture import capture_label_value_records, capture_text_lines
 from backend.app.ingestion.document_profiler import profile_document_text
 from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import TesseractOCR
 from backend.app.ingestion.tabular_parser import TabularEquipmentParser, detect_header_row
+from backend.app.llm.vision_extractor import ControlledVisionExtractor
 from backend.app.models.domain import EquipmentItem
 from backend.app.normalization.text import clean_text, normalize_search_text
 
@@ -521,16 +523,25 @@ def parse_adaptive_equipment_lines(
 
 
 class UniversalEquipmentParser:
-    def __init__(self, *, enable_ocr: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        enable_ocr: bool = True,
+        enable_ai_vision: bool | None = None,
+        vision_extractor: ControlledVisionExtractor | None = None,
+    ) -> None:
         self.tabular = TabularEquipmentParser()
         self.ocr = TesseractOCR()
         self.enable_ocr = enable_ocr
+        self.enable_ai_vision = app_settings.enable_ai_vision if enable_ai_vision is None else bool(enable_ai_vision)
+        self.vision_extractor = vision_extractor or ControlledVisionExtractor(app_settings)
 
     def capabilities(self) -> dict:
         return {
             "extensions": sorted(SUPPORTED_EXTENSIONS),
             "ocr": self.ocr.status().as_dict(),
-            "strategy": "native-first-ocr-on-demand",
+            "ai_vision": self.vision_extractor.status(),
+            "strategy": "native-first-ocr-then-ai-rescue-on-demand",
         }
 
     def parse_path(self, path: str | Path) -> ParsedDocument:
@@ -921,7 +932,86 @@ class UniversalEquipmentParser:
                 ),
             )
 
+        ai_rescue_used = False
+        ai_provider = None
+        ai_model = None
+        ai_latency_ms = None
+
+        needs_ai_rescue = (
+            self.enable_ai_vision
+            and self.vision_extractor.configured
+            and profile.kind != "DIRECTORY_CONTACTS"
+            and (
+                capture_completeness < app_settings.ai_vision_capture_threshold
+                or (expected_rows is not None and len(items) < expected_rows)
+                or (len(items) > 0 and structured_rows == 0 and profile.equipment_likelihood >= 0.55)
+            )
+        )
+        if needs_ai_rescue:
+            outcome = self.vision_extractor.extract(
+                image_bytes=data,
+                filename=filename,
+                local_ocr_text=text,
+                document_label=profile.label,
+            )
+            if outcome.ok and outcome.items:
+                ai_items = _dedupe(outcome.items)[:300]
+                ai_structured_rows = sum(
+                    1 for item in ai_items
+                    if item.quantite is not None and item.prix_unitaire is not None and item.prix_total is not None
+                )
+                ai_arithmetic_rows = sum(
+                    1 for item in ai_items
+                    if _arithmetic_consistent(item.quantite, item.prix_unitaire, item.prix_total)
+                )
+                denominator = expected_rows or len(ai_items) or 1
+                ai_extracted_ratio = min(1.0, len(ai_items) / denominator)
+                ai_structured_ratio = min(1.0, ai_structured_rows / denominator)
+                ai_arithmetic_ratio = min(1.0, ai_arithmetic_rows / denominator)
+                avg_ai_conf = (
+                    sum(float(item.extraction_confidence or 0.0) for item in ai_items) / len(ai_items)
+                    if ai_items else 0.0
+                )
+                ai_quality = max(
+                    0.0,
+                    min(
+                        1.0,
+                        0.45 * ai_extracted_ratio
+                        + 0.25 * ai_structured_ratio
+                        + 0.20 * ai_arithmetic_ratio
+                        + 0.10 * avg_ai_conf,
+                    ),
+                )
+
+                plausible_count = (
+                    expected_rows is None
+                    or len(ai_items) <= max(expected_rows + 3, int(expected_rows * 1.35))
+                )
+                materially_better = (
+                    ai_quality >= capture_completeness + 0.05
+                    or (
+                        expected_rows is not None
+                        and len(ai_items) > len(items)
+                        and ai_arithmetic_rows >= arithmetic_rows
+                    )
+                )
+                if plausible_count and materially_better:
+                    items = ai_items
+                    structured_rows = ai_structured_rows
+                    arithmetic_rows = ai_arithmetic_rows
+                    capture_completeness = ai_quality
+                    if expected_rows is None:
+                        expected_rows = len(ai_items)
+                    ai_rescue_used = True
+                    ai_provider = outcome.provider
+                    ai_model = outcome.model
+                    ai_latency_ms = outcome.latency_ms
+
         warnings: list[str] = []
+        if ai_rescue_used:
+            warnings.append(
+                "Les lignes du tableau ont été reconstruites par le renfort IA multimodal après contrôle de cohérence."
+            )
         if read.confidence < 55:
             warnings.append(
                 f"Qualité OCR moyenne/faible ({read.confidence:.0f} %). "
@@ -964,6 +1054,10 @@ class UniversalEquipmentParser:
                     table_rows_expected=expected_rows,
                     table_rows_extracted=len(items),
                     table_rows_arithmetic_ok=arithmetic_rows,
+                    ai_rescue_used=ai_rescue_used,
+                    ai_provider=ai_provider,
+                    ai_model=ai_model,
+                    ai_latency_ms=ai_latency_ms,
                 )
 
             if low_quality:
@@ -1033,5 +1127,9 @@ class UniversalEquipmentParser:
             table_rows_expected=expected_rows,
             table_rows_extracted=len(items),
             table_rows_arithmetic_ok=arithmetic_rows,
+            ai_rescue_used=ai_rescue_used,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+            ai_latency_ms=ai_latency_ms,
         )
 
