@@ -79,11 +79,20 @@ class Settings:
 
     nvidia_api_key: str = os.getenv("NVIDIA_API_KEY", "")
     nvidia_base_url: str = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-    nvidia_model: str = os.getenv("NVIDIA_MODEL", "moonshotai/kimi-k3")
+    nvidia_model: str = os.getenv("NVIDIA_MODEL", "deepseek-ai/deepseek-v4.1-flash")
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+
+    # Multimodal rescue for difficult scans/images. Local OCR always runs first;
+    # cloud vision is only called when structural extraction remains incomplete.
+    enable_ai_vision: bool = _env_bool("CADUCEUS_ENABLE_AI_VISION", True)
+    ai_vision_provider: str = os.getenv("CADUCEUS_AI_VISION_PROVIDER", "NVIDIA")
+    ai_vision_capture_threshold: float = float(os.getenv("CADUCEUS_AI_VISION_CAPTURE_THRESHOLD", "0.82"))
+    ai_vision_timeout_seconds: int = _env_int("CADUCEUS_AI_VISION_TIMEOUT_SECONDS", 60)
+    nvidia_vision_model: str = os.getenv("NVIDIA_VISION_MODEL", "deepseek-ai/deepseek-v4.1-flash")
+    openai_vision_model: str = os.getenv("OPENAI_VISION_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-luna"))
 
     # Benchmarks are NEVER launched on startup. These models are only evaluated on explicit command.
     benchmark_models_csv: str = os.getenv(
