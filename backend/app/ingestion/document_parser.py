@@ -105,6 +105,52 @@ def _estimate_commercial_row_count(text: str) -> int | None:
     return count or None
 
 
+def _parse_ocr_commercial_triplet(line: str) -> tuple[str, float, float, float] | None:
+    """Parse designation + quantity + unit price + total from a flattened OCR row.
+
+    Space-grouped thousands make regex-only parsing ambiguous. We therefore
+    enumerate numeric suffix splits and retain an arithmetically coherent one.
+    """
+    tokens = line.split()
+    if len(tokens) < 4:
+        return None
+
+    candidates: list[tuple[float, str, float, float, float]] = []
+    numeric_token = re.compile(r"^\d+(?:[.,]\d+)?$")
+
+    for q_idx in range(1, len(tokens) - 2):
+        if not numeric_token.fullmatch(tokens[q_idx]):
+            continue
+        designation = " ".join(tokens[:q_idx]).strip(" :-|")
+        if len(re.findall(r"[A-Za-zÀ-ÿ]", designation)) < 2:
+            continue
+        qty = _number(tokens[q_idx])
+        if qty is None or qty <= 0:
+            continue
+
+        tail = tokens[q_idx + 1 :]
+        if not tail or any(not numeric_token.fullmatch(tok) for tok in tail):
+            continue
+
+        for split in range(1, len(tail)):
+            unit_text = " ".join(tail[:split])
+            total_text = " ".join(tail[split:])
+            unit_price = _number(unit_text)
+            total = _number(total_text)
+            if unit_price is None or total is None or unit_price < 0 or total < 0:
+                continue
+            if not _arithmetic_consistent(qty, unit_price, total):
+                continue
+
+            score = q_idx * 10.0 - abs(len(tail[:split]) - len(tail[split:])) * 0.1
+            candidates.append((score, designation, qty, unit_price, total))
+
+    if not candidates:
+        return None
+    _, designation, qty, unit_price, total = max(candidates, key=lambda x: x[0])
+    return designation, qty, unit_price, total
+
+
 def _dedupe(items: Iterable[EquipmentItem]) -> list[EquipmentItem]:
     # First collapse duplicate commercial rows by monetary signature when present.
     monetary: dict[tuple, EquipmentItem] = {}
@@ -355,22 +401,12 @@ def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1
         if _looks_like_total(line):
             continue
 
-        m3 = re.match(
-            rf"^(?P<d>.+?[A-Za-zÀ-ÿ].*?)\s+(?P<q>{_QTY_NUM})\s+"
-            rf"(?P<up>{_MONEY_NUM})\s+(?P<tot>{_MONEY_NUM})$",
-            line,
-        )
-        if m3:
-            designation = m3.group("d").strip(" :-|")
+        parsed3 = _parse_ocr_commercial_triplet(line)
+        if parsed3:
+            designation, qty, unit_price, total = parsed3
             n = normalize_search_text(designation)
             if not designation or any(x in n for x in ("payment", "invoice no", "tel", "email", "address", "account", "date")):
                 continue
-            qty = _number(m3.group("q"))
-            unit_price = _number(m3.group("up"))
-            total = _number(m3.group("tot"))
-            if qty is None or unit_price is None or total is None:
-                continue
-            arithmetic_ok = _arithmetic_consistent(qty, unit_price, total)
             out.append(EquipmentItem(
                 source_document=filename,
                 source_page=source_page,
@@ -381,10 +417,10 @@ def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1
                 prix_unitaire=unit_price,
                 prix_total=total,
                 devise=currency,
-                extraction_confidence=0.90 if arithmetic_ok else 0.70,
+                extraction_confidence=0.92,
                 raw_fields={
                     "raw_ocr_line": line,
-                    "arithmetic_check": arithmetic_ok,
+                    "arithmetic_check": True,
                     "expected_total": qty * unit_price,
                 },
             ))
