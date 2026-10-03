@@ -918,6 +918,9 @@ class UniversalEquipmentParser:
                     captured_lines=captured_lines,
                     captured_records=captured_records,
                     capture_completeness=capture_completeness,
+                    table_rows_expected=expected_rows,
+                    table_rows_extracted=len(items),
+                    table_rows_arithmetic_ok=arithmetic_rows,
                 )
 
             if low_quality:
@@ -984,5 +987,8 @@ class UniversalEquipmentParser:
             captured_lines=captured_lines,
             captured_records=captured_records,
             capture_completeness=capture_completeness,
+            table_rows_expected=expected_rows,
+            table_rows_extracted=len(items),
+            table_rows_arithmetic_ok=arithmetic_rows,
         )
 
