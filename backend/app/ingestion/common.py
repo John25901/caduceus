@@ -33,6 +33,9 @@ class ParsedDocument:
     captured_lines: list[dict] = field(default_factory=list)
     captured_records: list[dict] = field(default_factory=list)
     capture_completeness: float | None = None
+    table_rows_expected: int | None = None
+    table_rows_extracted: int | None = None
+    table_rows_arithmetic_ok: int | None = None
 
     def as_metadata(self) -> dict:
         return {
@@ -56,4 +59,7 @@ class ParsedDocument:
             "captured_lines": self.captured_lines,
             "captured_records": self.captured_records,
             "capture_completeness": self.capture_completeness,
+            "table_rows_expected": self.table_rows_expected,
+            "table_rows_extracted": self.table_rows_extracted,
+            "table_rows_arithmetic_ok": self.table_rows_arithmetic_ok,
         }
