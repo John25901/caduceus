@@ -25,6 +25,8 @@ SUPPORTED_EXTENSIONS = {
 
 _UNIT_RE = r"(?:set|sets|pcs?|pieces?|units?|uni|lots?|jeux?|m2|m²|m3|m³|kg|kgs|tonnes?|tons?|t|ens|bac|bags?|rolls?)"
 _NUM = r"[-+]?\d[\d\s,.]*"
+_QTY_NUM = r"\d+(?:[.,]\d+)?"
+_MONEY_NUM = r"(?:\d{1,3}(?:[ \u00A0\u202F]\d{3})+|\d+)(?:[.,]\d{1,2})?"
 
 
 def _number(value: str | None) -> float | None:
@@ -64,6 +66,43 @@ def _looks_like_total(designation: str) -> bool:
         ("total" in n and any(x in n for x in ("fob", "cif", "exw", "price", "amount", "montant")))
         or n in {"total", "subtotal", "sous total", "grand total"}
     )
+
+
+def _arithmetic_consistent(qty: float | None, unit_price: float | None, total: float | None) -> bool:
+    if qty is None or unit_price is None or total is None:
+        return False
+    expected = qty * unit_price
+    tolerance = max(1.0, abs(total) * 0.015)
+    return abs(expected - total) <= tolerance
+
+
+def _estimate_commercial_row_count(text: str) -> int | None:
+    """Estimate visible commercial rows from OCR text without inventing data."""
+    lines = [clean_text(x) for x in (text or "").splitlines() if clean_text(x)]
+    if not lines:
+        return None
+
+    header_idx = None
+    for i, line in enumerate(lines):
+        n = normalize_search_text(line)
+        if (
+            any(x in n for x in ("designation", "description", "article", "item"))
+            and any(x in n for x in ("quantite", "quantity", "qty", "qte"))
+            and any(x in n for x in ("prix", "price"))
+        ):
+            header_idx = i
+            break
+    if header_idx is None:
+        return None
+
+    count = 0
+    for line in lines[header_idx + 1 :]:
+        n = normalize_search_text(line)
+        if n.startswith("total") or n.startswith("grand total") or _looks_like_total(line):
+            break
+        if len(re.findall(r"[A-Za-zÀ-ÿ]", line)) >= 2:
+            count += 1
+    return count or None
 
 
 def _dedupe(items: Iterable[EquipmentItem]) -> list[EquipmentItem]:
@@ -304,21 +343,61 @@ def _parse_simple_price_table(rows: list[list[str]], filename: str, page_no: int
 
 
 def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1, method: str = "OCR_IMAGE") -> list[EquipmentItem]:
-    """Fallback for OCR that loses the serial/quantity column but retains description and prices."""
+    """Recover commercial OCR rows even when serial/unit columns are absent.
+
+    Preferred shape: designation | quantity | unit price | amount.
+    Prices may use grouped spaces such as 28 000.
+    """
     out: list[EquipmentItem] = []
     currency = _guess_currency(text)
+
     for line in [clean_text(x) for x in text.splitlines() if clean_text(x)]:
         if _looks_like_total(line):
             continue
-        # At least two terminal numeric fields are required to keep this conservative.
-        m = re.match(rf"^(?P<d>.+?[A-Za-zÀ-ÿ].*?)\s+(?P<a>{_NUM})\s+(?P<b>{_NUM})$", line)
-        if not m:
+
+        m3 = re.match(
+            rf"^(?P<d>.+?[A-Za-zÀ-ÿ].*?)\s+(?P<q>{_QTY_NUM})\s+"
+            rf"(?P<up>{_MONEY_NUM})\s+(?P<tot>{_MONEY_NUM})$",
+            line,
+        )
+        if m3:
+            designation = m3.group("d").strip(" :-|")
+            n = normalize_search_text(designation)
+            if not designation or any(x in n for x in ("payment", "invoice no", "tel", "email", "address", "account", "date")):
+                continue
+            qty = _number(m3.group("q"))
+            unit_price = _number(m3.group("up"))
+            total = _number(m3.group("tot"))
+            if qty is None or unit_price is None or total is None:
+                continue
+            arithmetic_ok = _arithmetic_consistent(qty, unit_price, total)
+            out.append(EquipmentItem(
+                source_document=filename,
+                source_page=source_page,
+                extraction_method=method,
+                designation_source=designation,
+                designation_normalisee=normalize_search_text(designation),
+                quantite=qty,
+                prix_unitaire=unit_price,
+                prix_total=total,
+                devise=currency,
+                extraction_confidence=0.90 if arithmetic_ok else 0.70,
+                raw_fields={
+                    "raw_ocr_line": line,
+                    "arithmetic_check": arithmetic_ok,
+                    "expected_total": qty * unit_price,
+                },
+            ))
             continue
-        designation = m.group("d").strip(" :-")
+
+        m2 = re.match(rf"^(?P<d>.+?[A-Za-zÀ-ÿ].*?)\s+(?P<a>{_MONEY_NUM})\s+(?P<b>{_MONEY_NUM})$", line)
+        if not m2:
+            continue
+        designation = m2.group("d").strip(" :-|")
         n = normalize_search_text(designation)
         if any(x in n for x in ("payment", "invoice no", "tel", "email", "address", "account", "date")):
             continue
-        a, b = _number(m.group("a")), _number(m.group("b"))
+        a, b = _number(m2.group("a")), _number(m2.group("b"))
         if a is None or b is None:
             continue
         out.append(EquipmentItem(
@@ -330,8 +409,8 @@ def parse_ocr_commercial_lines(text: str, filename: str, *, source_page: int = 1
             prix_unitaire=a,
             prix_total=b,
             devise=currency,
-            extraction_confidence=0.62,
-            raw_fields={"raw_ocr_line": line},
+            extraction_confidence=0.60,
+            raw_fields={"raw_ocr_line": line, "arithmetic_check": None},
         ))
     return out
 
@@ -760,19 +839,44 @@ class UniversalEquipmentParser:
         profile = profile_document_text(text)
         captured_lines = capture_text_lines(text)
         captured_records = capture_label_value_records(text)
-        capture_completeness = max(
-            0.0,
-            min(
-                1.0,
-                (read.confidence / 100.0) * (1.0 - min(0.85, read.low_confidence_ratio))
-                + min(read.token_count, 120) / 1200.0,
-            ),
-        )
         items = parse_loose_text(text, filename, source_page=1, method="OCR_IMAGE", require_commercial_structure=True)
         if not items:
             items = parse_ocr_commercial_lines(text, filename, source_page=1, method="OCR_IMAGE")
         if not items and profile.equipment_likelihood >= 0.62:
             items = parse_adaptive_equipment_lines(text, filename, source_page=1, method="OCR_IMAGE_ADAPTIVE")
+
+        expected_rows = _estimate_commercial_row_count(text)
+        structured_rows = sum(
+            1 for item in items
+            if item.quantite is not None and item.prix_unitaire is not None and item.prix_total is not None
+        )
+        arithmetic_rows = sum(
+            1 for item in items
+            if _arithmetic_consistent(item.quantite, item.prix_unitaire, item.prix_total)
+        )
+        if expected_rows:
+            extracted_ratio = min(1.0, len(items) / expected_rows)
+            structured_ratio = min(1.0, structured_rows / expected_rows)
+            arithmetic_ratio = min(1.0, arithmetic_rows / expected_rows)
+            capture_completeness = max(
+                0.0,
+                min(
+                    1.0,
+                    0.45 * extracted_ratio
+                    + 0.25 * structured_ratio
+                    + 0.20 * arithmetic_ratio
+                    + 0.10 * (read.confidence / 100.0),
+                ),
+            )
+        else:
+            capture_completeness = max(
+                0.0,
+                min(
+                    1.0,
+                    (read.confidence / 100.0) * (1.0 - min(0.85, read.low_confidence_ratio))
+                    + min(read.token_count, 120) / 1200.0,
+                ),
+            )
 
         warnings: list[str] = []
         if read.confidence < 55:
