@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import statistics
+import threading
 import time
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -34,23 +35,65 @@ def _p95_ms(values: list[float]) -> float | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    with PerformanceProbe() as probe:
-        services = build_runtime_services(settings)
-        app.state.services = services
-        snap = probe.finish({
-            "camcis_records": len(services.repo.load()),
-            "camcis_sha256": services.repo.sha256,
-            "search_mode": services.engine.mode,
-            "semantic_status": services.index_sync.status,
-            "semantic_collection": services.index_sync.collection_name,
-            "validated_cases": services.engine.history.count if services.engine.history else 0,
-        })
-    services.metrics.record_runtime("APP_STARTUP", snap)
+    """Start the HTTP API immediately and initialize the heavy RAG stack in background.
+
+    Streamlit Community Cloud uses ephemeral storage, so a cold start may need to
+    rebuild the CAMCIS semantic index and load the embedding model. Blocking the
+    FastAPI lifespan on that work made port 8000 appear unavailable for several
+    minutes and triggered duplicate uvicorn launches. The API now becomes reachable
+    immediately; business endpoints return 503 until the runtime services are ready.
+    """
+    app.state.services = None
+    app.state.startup_status = {
+        "status": "initializing",
+        "phase": "Référentiel CAMCIS / index sémantique",
+        "error": None,
+    }
+
+    def _initialize_runtime() -> None:
+        try:
+            with PerformanceProbe() as probe:
+                services = build_runtime_services(settings)
+                app.state.services = services
+                snap = probe.finish({
+                    "camcis_records": len(services.repo.load()),
+                    "camcis_sha256": services.repo.sha256,
+                    "search_mode": services.engine.mode,
+                    "semantic_status": services.index_sync.status,
+                    "semantic_collection": services.index_sync.collection_name,
+                    "validated_cases": services.engine.history.count if services.engine.history else 0,
+                })
+            services.metrics.record_runtime("APP_STARTUP", snap)
+            app.state.startup_status = {
+                "status": "ready",
+                "phase": "Prêt",
+                "error": None,
+            }
+        except Exception as exc:
+            # Keep the API process alive so the UI can present a controlled status
+            # instead of a Streamlit traceback and repeated process restarts.
+            app.state.startup_status = {
+                "status": "error",
+                "phase": "Initialisation interrompue",
+                "error": str(exc),
+            }
+
+    startup_thread = threading.Thread(
+        target=_initialize_runtime,
+        name="cgs-runtime-bootstrap",
+        daemon=True,
+    )
+    startup_thread.start()
+
     try:
         yield
     finally:
-        services.engine.close()
-        services.metrics.record_runtime("APP_SHUTDOWN", details={"search_mode": services.engine.mode})
+        services = getattr(app.state, "services", None)
+        if services is not None:
+            try:
+                services.engine.close()
+            finally:
+                services.metrics.record_runtime("APP_SHUTDOWN", details={"search_mode": services.engine.mode})
 
 
 app = FastAPI(
@@ -73,13 +116,42 @@ def svc(request: Request) -> RuntimeServices:
 
 @app.get("/health")
 def health(request: Request):
-    s = svc(request)
+    s = getattr(request.app.state, "services", None)
+    startup = getattr(
+        request.app.state,
+        "startup_status",
+        {"status": "initializing", "phase": "Initialisation", "error": None},
+    )
+
+    if s is None:
+        # HTTP 200 is intentional: the process is alive. The UI can distinguish
+        # "initializing" from "error" without the cloud launcher spawning a second
+        # uvicorn instance on the same port.
+        return {
+            "status": startup.get("status") or "initializing",
+            "version": app.version,
+            "startup": startup,
+            "camcis": {"records": 0},
+            "search_mode": "INITIALISATION",
+            "semantic_index": {"status": "INITIALIZING", "semantic_enabled": settings.enable_semantic},
+            "validated_memory": {"cases": 0},
+            "metrics": {},
+            "ingestion": UniversalEquipmentParser().capabilities(),
+            "llm_arbitration": {
+                "enabled": settings.enable_llm_arbitration,
+                "providers": [],
+                "max_calls_per_dossier": settings.llm_max_calls_per_dossier,
+            },
+            "docker_required": False,
+        }
+
     semantic_expected = settings.enable_semantic
     semantic_ready = s.index_sync.ready and bool(s.engine.vector and s.engine.vector.available)
     status = "ok" if (not semantic_expected or semantic_ready) else "degraded"
     return {
         "status": status,
         "version": app.version,
+        "startup": startup,
         "camcis": s.repo.stats(),
         "search_mode": s.engine.mode,
         "semantic_index": s.index_sync.as_dict(),
