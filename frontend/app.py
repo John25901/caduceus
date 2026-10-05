@@ -280,20 +280,44 @@ with st.sidebar:
 
     st.divider()
     st.subheader("État du système")
-    try:
-        r = api_get("/health", timeout=5)
-        if r.ok:
+
+    def _render_system_health() -> None:
+        try:
+            r = api_get("/health", timeout=5)
+            if not r.ok:
+                st.warning("Service interne temporairement indisponible.")
+                return
+
             h = r.json()
-            if h["status"] == "ok":
-                st.success(f"Prêt — {h['camcis']['records']} positions de référence")
+            status = h.get("status")
+            startup = h.get("startup") or {}
+
+            if status == "initializing":
+                st.info("Initialisation du moteur RAG en arrière-plan…")
+                st.caption(startup.get("phase") or "Chargement du référentiel et de l'index sémantique.")
+                st.caption("L'interface reste disponible ; le traitement sera activé dès que le moteur sera prêt.")
+                return
+
+            if status == "error":
+                st.warning("Le moteur local a rencontré un problème d'initialisation.")
+                st.caption("L'application reste active afin d'éviter une interruption brutale. Consultez les logs techniques.")
+                return
+
+            if status == "ok":
+                st.success(f"Prêt — {h.get('camcis', {}).get('records', 0)} positions de référence")
             else:
                 st.warning("Prêt en mode dégradé")
-            st.caption(f"Index référentiel : {h['semantic_index']['status']}")
+
+            semantic = h.get("semantic_index") or {}
+            st.caption(f"Index référentiel : {semantic.get('status', 'inconnu')}")
+            st.caption(f"Recherche : {h.get('search_mode', 'inconnue')}")
+
             ocr = (h.get("ingestion") or {}).get("ocr") or {}
             if ocr.get("available"):
                 st.caption(f"OCR : disponible ({ocr.get('engine', 'Tesseract')})")
             else:
                 st.caption("OCR images/scans : indisponible sur cette instance — vérifiez le déploiement Tesseract.")
+
             llm = h.get("llm_arbitration") or {}
             configured_ai = [p for p in (llm.get("providers") or []) if p.get("configured")]
             if configured_ai:
@@ -302,10 +326,17 @@ with st.sidebar:
             else:
                 st.caption("Arbitrage IA : non configuré — moteur local reste opérationnel")
             st.caption("Docker : non requis")
-        else:
-            st.error("API indisponible")
-    except Exception:
-        st.warning("API en cours de démarrage…")
+        except Exception:
+            st.info("Connexion au moteur en cours…")
+
+    if hasattr(st, "fragment"):
+        @st.fragment(run_every=5)
+        def _system_health_fragment():
+            _render_system_health()
+
+        _system_health_fragment()
+    else:
+        _render_system_health()
 
 mapping_tab, guide_tab, metrics_tab, eval_tab = st.tabs(
     ["Traitement d'un dossier", "Guide utilisateur", "Santé & métriques", "Évaluation moteur"]
