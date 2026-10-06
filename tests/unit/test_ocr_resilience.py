@@ -8,6 +8,9 @@ from PIL import Image, features
 from backend.app.ingestion.document_parser import UniversalEquipmentParser
 from backend.app.ingestion.errors import IngestionError
 from backend.app.ingestion.ocr_service import OCRReadResult, OCRStatus
+from backend.app.llm.vision_extractor import VisionExtractionOutcome
+from backend.app.models.domain import EquipmentItem
+from backend.app.normalization.text import normalize_search_text
 
 
 class _FakeOCR:
@@ -96,3 +99,73 @@ def test_processing_rejects_non_equipment_image_with_business_error():
     with pytest.raises(IngestionError) as exc:
         parser.parse_bytes(_image_bytes("PNG"), "directory.png")
     assert exc.value.code == "DOCUMENT_HORS_PERIMETRE"
+
+
+
+class _WeakTableOCR:
+    def status(self):
+        return OCRStatus(True, "fake", "fake", ("fra", "eng"))
+
+    def read_best(self, image):
+        return OCRReadResult(
+            text=(
+                "Designation Quantite Prix unitaire Montant\n"
+                "Tamis 500 2 000\n"
+                "Grande Bassine 6 000 12 000\n"
+                "TOTAL 14 000"
+            ),
+            confidence=82.0,
+            strategy="gentle",
+            psm=11,
+            token_count=16,
+            line_count=4,
+            low_confidence_ratio=0.08,
+        )
+
+
+class _FakeVisionExtractor:
+    configured = True
+
+    def status(self):
+        return {"provider": "NVIDIA", "model": "test-vlm", "configured": True}
+
+    def extract(self, **kwargs):
+        def item(name, q, pu, total):
+            return EquipmentItem(
+                source_document=kwargs["filename"],
+                source_page=1,
+                extraction_method="AI_VISION_NVIDIA",
+                designation_source=name,
+                designation_normalisee=normalize_search_text(name),
+                quantite=q,
+                prix_unitaire=pu,
+                prix_total=total,
+                devise="XAF",
+                extraction_confidence=0.94,
+            )
+
+        return VisionExtractionOutcome(
+            ok=True,
+            items=[
+                item("Tamis", 4, 500, 2000),
+                item("Grande Bassine", 2, 6000, 12000),
+            ],
+            provider="NVIDIA",
+            model="test-vlm",
+            latency_ms=120.0,
+        )
+
+
+def test_incomplete_local_ocr_escalates_to_vision_without_interrupting():
+    parser = UniversalEquipmentParser(vision_extractor=_FakeVisionExtractor())
+    parser.ocr = _WeakTableOCR()
+    parsed = parser.parse_bytes(_image_bytes("PNG"), "table.png", inspection_only=True)
+
+    assert parsed.ai_rescue_used is True
+    assert parsed.ai_provider == "NVIDIA"
+    assert parsed.ai_model == "test-vlm"
+    assert len(parsed.items) == 2
+    by_name = {item.designation_source: item for item in parsed.items}
+    assert by_name["Tamis"].quantite == 4
+    assert by_name["Tamis"].prix_unitaire == 500
+    assert by_name["Tamis"].prix_total == 2000

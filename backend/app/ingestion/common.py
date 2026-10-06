@@ -36,6 +36,10 @@ class ParsedDocument:
     table_rows_expected: int | None = None
     table_rows_extracted: int | None = None
     table_rows_arithmetic_ok: int | None = None
+    ai_rescue_used: bool = False
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    ai_latency_ms: float | None = None
 
     def as_metadata(self) -> dict:
         return {
@@ -62,4 +66,8 @@ class ParsedDocument:
             "table_rows_expected": self.table_rows_expected,
             "table_rows_extracted": self.table_rows_extracted,
             "table_rows_arithmetic_ok": self.table_rows_arithmetic_ok,
+            "ai_rescue_used": self.ai_rescue_used,
+            "ai_provider": self.ai_provider,
+            "ai_model": self.ai_model,
+            "ai_latency_ms": self.ai_latency_ms,
         }
