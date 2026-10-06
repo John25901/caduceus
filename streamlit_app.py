@@ -68,53 +68,60 @@ def _start_api_if_needed() -> None:
     if _healthy():
         return
 
-    owner = _claim_start_lock()
-    if owner:
-        log_path = Path(tempfile.gettempdir()) / "caduceus_fastapi.log"
-        log = open(log_path, "a", encoding="utf-8")
-        env = os.environ.copy()
-        subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "backend.app.main:app",
-                "--host",
-                HOST,
-                "--port",
-                str(PORT),
-                "--log-level",
-                os.getenv("CADUCEUS_UVICORN_LOG_LEVEL", "warning"),
-            ],
-            cwd=str(ROOT),
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    # A process may already own the port while the RAG stack is still warming up.
+    # Never launch a second uvicorn merely because /health is not ready yet.
+    port_already_owned = _port_open()
+    owner = False
+    if not port_already_owned:
+        owner = _claim_start_lock()
 
-    # L'index CAMCIS peut être reconstruit lors d'un cold start. L'UI n'est chargée
-    # qu'une fois l'API réellement prête, ce qui évite les WinError/ConnectionError.
-    timeout_s = int(os.getenv("CADUCEUS_CLOUD_STARTUP_TIMEOUT", "300"))
+    if owner:
+        # Re-check after taking the lock: another process may have completed its bind.
+        if not _port_open() and not _healthy():
+            log_path = Path(tempfile.gettempdir()) / "caduceus_fastapi.log"
+            log = open(log_path, "a", encoding="utf-8")
+            env = os.environ.copy()
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "backend.app.main:app",
+                    "--host",
+                    HOST,
+                    "--port",
+                    str(PORT),
+                    "--log-level",
+                    os.getenv("CADUCEUS_UVICORN_LOG_LEVEL", "warning"),
+                ],
+                cwd=str(ROOT),
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    # The HTTP API now comes up before the heavy semantic bootstrap. This wait only
+    # covers the process bind/health endpoint, not the full Qdrant/model rebuild.
+    timeout_s = int(os.getenv("CADUCEUS_CLOUD_STARTUP_TIMEOUT", "90"))
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if _healthy():
             LOCK.unlink(missing_ok=True)
             return
-        time.sleep(1.0)
+        time.sleep(0.5)
 
+    # Do not crash the whole Streamlit app with a raw traceback. Keep a clean
+    # operational message; the next Streamlit rerun can attach to the same process.
     LOCK.unlink(missing_ok=True)
-    log_path = Path(tempfile.gettempdir()) / "caduceus_fastapi.log"
-    tail = ""
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        tail = "\n".join(lines[-40:])
-    except Exception:
-        pass
-    raise RuntimeError(
-        "L'API interne CGS n'a pas démarré dans le délai imparti. "
-        "Consultez les logs Streamlit.\n" + tail
+    import streamlit as st
+
+    st.error(
+        "CGS démarre plus lentement que prévu. Le service interne reste en cours "
+        "d'initialisation ; aucune donnée de dossier n'a été perdue."
     )
+    st.info("Réessayez dans quelques instants. Si le message persiste, consultez « Manage app > Logs ».")
+    st.stop()
 
 
 _start_api_if_needed()
